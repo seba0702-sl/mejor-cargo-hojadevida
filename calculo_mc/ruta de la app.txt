@@ -1,0 +1,2 @@
+cd C:\Users\Seba\Documents\GitHub\calculo_mejorCargo_mod\calculo_mc
+streamlit run Inicio_CargaDeDatos.py

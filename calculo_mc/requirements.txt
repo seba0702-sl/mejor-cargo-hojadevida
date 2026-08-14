@@ -1,0 +1,10 @@
+streamlit
+streamlit-plotly-events
+pandas
+numpy
+plotly
+openpyxl
+pdfplumber
+python-dateutil
+fitz
+PyMuPDF
