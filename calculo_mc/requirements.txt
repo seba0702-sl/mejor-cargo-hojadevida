@@ -6,5 +6,4 @@ plotly
 openpyxl
 pdfplumber
 python-dateutil
-fitz
 PyMuPDF
