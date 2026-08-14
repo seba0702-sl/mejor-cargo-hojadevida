@@ -96,6 +96,214 @@ def detectar_nivel_en_linea(texto, niveles):
     return None
 
 
+def detectar_nivel_desde_escuela(escuela):
+    esc = str(escuela or "").upper()
+    esc = (
+        esc.replace("Á", "A")
+           .replace("É", "E")
+           .replace("Í", "I")
+           .replace("Ó", "O")
+           .replace("Ú", "U")
+    )
+    esc = re.sub(r"\s+", " ", esc).strip()
+
+    # ADULTO
+    if any(x in esc for x in [
+        "C. E. N. S",
+        "C.E.N.S",
+        "C E N S",
+        "CENS",
+        "CENTRO DE FORM. PROF",
+        "CENTRO DE FORMACION PROF",
+        "FORMACION PROFESIONAL",
+        "CFP",
+        "ADULTOS",
+        "CENTRO EDUCATIVO NIVEL SECUNDARIO","DM", "CENS", "DF", "DS", "MF", "ADULTOS", "ADULTO", "CFP", "CFL",
+    ]):
+        return "Adulto"
+
+    # SECUNDARIA
+    if any(x in esc for x in [
+        "ESC. DE ENS. MEDIA",
+        "ESC DE ENS MEDIA",
+        "ESCUELA DE EDUCACION MEDIA",
+        "ESC. DE EDUC. SECUNDARIA",
+        "ESC DE EDUC SECUNDARIA",
+        "ESCUELA DE EDUCACION SECUNDARIA",
+        "ESC. SECUNDARIA BASICA",
+        "ESCUELA SECUNDARIA BASICA",
+        "ESC. SECUND. TECNICA",
+        "ESCUELA DE EDUCACION SECUNDARIA TECNICA",
+        "MM","MS", "ES", "ESB", "MT", "BS", "MA", "MC", "AS",
+    ]):
+        return "Secundaria"
+
+    # INICIAL
+    if any(x in esc for x in [
+        "JARDIN",
+        "JARDIN DE INFANTES",
+        "JARDIN MATERNAL",
+        "INICIAL",
+        "PREESCOLAR",
+        "JI","JS",
+        "JU",
+        "JM",
+        "JV",
+    ]):
+        return "Inicial"
+
+    # SUPERIOR
+    if any(x in esc for x in [
+        "INSTITUTO SUPERIOR",
+        "INSTITUTO",
+        "SUPERIOR",
+        "INST. SUP.",
+        "INST SUPERIOR",
+        "CEF",
+        "CENTRO DE EDUC. FISICA",
+        "FC","IS", "AA", "AT", "AF", "AV", "AC", "AD", "AM", "AP", "FC",
+    ]):
+        return "Superior"
+
+    # ESPECIAL
+    if any(x in esc for x in [
+        "ESPECIAL",
+        "ESC. ESP.",
+        "ESP.",
+        "CENTRO DE FORMACION INTEGRAL",
+        "CFI","EE", "EL", "CFI", "ET", "ESPECIAL",
+    ]):
+        return "Especial"
+
+    # PRIMARIA
+    if any(x in esc for x in [
+        "ESCUELA PRIMARIA",
+        "EDUCACION PRIMARIA",
+        "PRIMARIA BASICA",
+        "PRIMARIA",
+        "E.P.",
+        "EP N",
+        "ESCUELA PRIMARIA BASICA",
+        "PP","PP", "EP", "PA", "DA", "DC", "DE",
+    ]):
+        return "Primaria"
+
+    return ""
+def detectar_tipo_carga_desde_fila(escuela, cargo, nivel=""):
+    """
+    Decide si la carga de la fila va a HORAS_CATEDRA o MODULOS
+    usando NIVEL / ESCUELA / CARGO.
+    """
+    txt = " ".join([
+        str(nivel or ""),
+        str(escuela or ""),
+        str(cargo or "")
+    ]).upper()
+
+    txt = (
+        txt.replace("Á", "A")
+           .replace("É", "E")
+           .replace("Í", "I")
+           .replace("Ó", "O")
+           .replace("Ú", "U")
+    )
+    txt = re.sub(r"\s+", " ", txt).strip()
+
+    # -----------------------------------------
+    # MODULOS
+    # -----------------------------------------
+    if any(x in txt for x in [
+        "MODULO",
+        "MODULOS",
+        "HORAS MODULO",
+        "HS. MODULO",
+        "PROFESOR HS. MODULO",
+    ]):
+        return "MODULOS"
+
+    # -----------------------------------------
+    # HORAS CATEDRA
+    # -----------------------------------------
+    if any(x in txt for x in [
+        "HORAS DE CATEDRA",
+        "HORAS CATEDRA",
+        "HS. CATEDRA",
+        "HS CATEDRA",
+        "CAT.",
+        "CATEDRA",
+        "CATEDRAS",
+        "HORAS",
+        "INSTRUCTOR"
+    ]):
+        return "HORAS_CATEDRA"
+
+    return ""
+
+
+def completar_carga_y_nivel_hoja_vida(df):
+    """
+    Completa NIVEL, HORAS_CATEDRA y MODULOS para hoja de vida
+    venga de Excel, pegado o PDF.
+    """
+    if df is None or df.empty:
+        return df
+
+    df = df.copy()
+    df.columns = df.columns.astype(str).str.upper().str.strip()
+
+    # asegurar columnas
+    for col in ["NIVEL", "HORAS_CATEDRA", "MODULOS"]:
+        if col not in df.columns:
+            df[col] = ""
+
+    col_escuela = next((c for c in df.columns if "ESCUELA" in c), None)
+    col_cargo = next((c for c in df.columns if "CARGO" in c), None)
+    col_carga = next((c for c in df.columns if "CARGA" in c), None)
+
+    if col_escuela is None:
+        return df
+
+    # -----------------------------------------
+    # NIVEL
+    # -----------------------------------------
+    for i in df.index:
+        escuela = df.at[i, col_escuela] if col_escuela in df.columns else ""
+        cargo = df.at[i, col_cargo] if col_cargo in df.columns else ""
+
+        nivel_actual = str(df.at[i, "NIVEL"]).strip() if "NIVEL" in df.columns else ""
+
+        if not nivel_actual:
+            df.at[i, "NIVEL"] = detectar_nivel_desde_escuela(escuela)
+
+    # -----------------------------------------
+    # HORAS_CATEDRA / MODULOS
+    # -----------------------------------------
+    if col_carga is not None:
+        for i in df.index:
+            carga = pd.to_numeric(df.at[i, col_carga], errors="coerce")
+            if pd.isna(carga):
+                continue
+
+            carga = int(carga)
+
+            escuela = df.at[i, col_escuela] if col_escuela in df.columns else ""
+            cargo = df.at[i, col_cargo] if col_cargo in df.columns else ""
+            nivel = df.at[i, "NIVEL"] if "NIVEL" in df.columns else ""
+
+            tipo = detectar_tipo_carga_desde_fila(escuela, cargo, nivel)
+
+            if tipo == "MODULOS":
+                df.at[i, "MODULOS"] = carga
+                if not str(df.at[i, "HORAS_CATEDRA"]).strip():
+                    df.at[i, "HORAS_CATEDRA"] = ""
+
+            elif tipo == "HORAS_CATEDRA":
+                df.at[i, "HORAS_CATEDRA"] = carga
+                if not str(df.at[i, "MODULOS"]).strip():
+                    df.at[i, "MODULOS"] = ""
+
+    return df
+
 def extraer_datos_diegep(pdf_file):
     data_vida, data_licencias = [], []
 
@@ -186,141 +394,416 @@ def extraer_datos_diegep(pdf_file):
 
 
 def extraer_certificacion_dgcye(pdf_file):
-
     import pdfplumber
     import pandas as pd
     import re
 
-    texto = ""
+    def normalizar_texto(s):
+        s = str(s or "").upper()
+        s = (
+            s.replace("Á", "A")
+             .replace("É", "E")
+             .replace("Í", "I")
+             .replace("Ó", "O")
+             .replace("Ú", "U")
+        )
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
 
+    def extraer_nivel_pdf_desde_establecimiento(escuela):
+        esc = str(escuela or "").strip()
+        esc_norm = normalizar_texto(esc)
+
+        patrones = [
+            "ESC. DE EDUC. SECUNDARIA",
+            "ESC. DE ENS. MEDIA",
+            "ESC. SECUNDARIA BASICA",
+            "ESC. SECUND. TECNICA",
+            "C. E. N. S.",
+            "C.E.N.S.",
+            "CENS",
+            "CENTRO DE FORM. PROF.",
+            "CENTRO DE FORMACION PROF.",
+            "JARDIN DE INFANTES",
+            "JARDIN MATERNAL",
+            "ESCUELA PRIMARIA",
+            "INSTITUTO SUPERIOR",
+            "INSTITUTO",
+            "SUPERIOR",
+            "ESPECIAL",
+            "ESP.",
+            "PRIMARIA",
+        ]
+
+        for patron in sorted(patrones, key=len, reverse=True):
+            if normalizar_texto(patron) in esc_norm:
+                return patron
+
+        partes = re.split(r"\s*-\s*", esc, maxsplit=1)
+        if partes and partes[0].strip():
+            return partes[0].strip()
+
+        return ""
+
+    def homologar_nivel(nivel_pdf, escuela):
+        niv = normalizar_texto(nivel_pdf)
+        esc = normalizar_texto(escuela)
+
+        if any(x in niv for x in [
+            "C. E. N. S", "C.E.N.S", "C E N S", "CENS",
+            "CENTRO DE FORM. PROF", "CENTRO DE FORMACION PROF",
+            "FORMACION PROFESIONAL",
+        ]):
+            return "Adulto"
+
+        if any(x in esc for x in [
+            "C. E. N. S", "C.E.N.S", "C E N S", "CENS",
+            "ADULTOS", "CFP", "CENTRO DE FORM. PROF",
+            "CENTRO DE FORMACION PROF", "FORMACION PROFESIONAL",
+            "CENTRO EDUCATIVO NIVEL SECUNDARIO",
+        ]):
+            return "Adulto"
+
+        if any(x in niv for x in [
+            "ESC. DE ENS. MEDIA",
+            "ESC. DE EDUC. SECUNDARIA",
+            "ESC. SECUNDARIA BASICA",
+            "ESC. SECUND. TECNICA",
+        ]):
+            return "Secundaria"
+
+        if any(x in esc for x in [
+            "ESC. DE ENS. MEDIA",
+            "ESC DE ENS MEDIA",
+            "ESCUELA DE EDUCACION MEDIA",
+            "ESC. DE EDUC. SECUNDARIA",
+            "ESC DE EDUC SECUNDARIA",
+            "ESCUELA DE EDUCACION SECUNDARIA",
+            "ESC. SECUNDARIA BASICA",
+            "ESC. SECUND. TECNICA",
+            "ESCUELA DE EDUCACION SECUNDARIA TECNICA",
+            "MM", "MS",
+        ]):
+            return "Secundaria"
+
+        if any(x in niv for x in [
+            "JARDIN DE INFANTES",
+            "JARDIN MATERNAL",
+            "INICIAL",
+        ]):
+            return "Inicial"
+
+        if any(x in esc for x in [
+            "JARDIN",
+            "JARDIN DE INFANTES",
+            "INICIAL",
+            "PREESCOLAR",
+            "JI",
+        ]):
+            return "Inicial"
+
+        if any(x in niv for x in [
+            "INSTITUTO SUPERIOR",
+            "INSTITUTO",
+            "SUPERIOR",
+        ]):
+            return "Superior"
+
+        if any(x in esc for x in [
+            "INSTITUTO",
+            "SUPERIOR",
+            "INST. SUP.",
+            "INST SUPERIOR",
+            "CEF",
+            "CENTRO DE EDUC. FISICA",
+            "FC",
+        ]):
+            return "Superior"
+
+        if any(x in niv for x in ["ESPECIAL", "ESP."]):
+            return "Especial"
+
+        if any(x in esc for x in [
+            "ESPECIAL",
+            "ESC. ESP.",
+            "CENTRO DE FORMACION INTEGRAL",
+            "CFI",
+        ]):
+            return "Especial"
+
+        if any(x in niv for x in ["ESCUELA PRIMARIA", "PRIMARIA"]):
+            return "Primaria"
+
+        if any(x in esc for x in [
+            "ESCUELA PRIMARIA",
+            "EDUCACION PRIMARIA",
+            "PRIMARIA BASICA",
+            "EP N",
+            "E.P. N",
+            "PP",
+            "ESCUELA PRIMARIA BASICA",
+        ]):
+            return "Primaria"
+
+        return ""
+
+    def repartir_carga_por_tipo(carga, nivel_ensenanza_pdf):
+        """
+        Si el NIVEL ENSEÑANZA del PDF dice HORAS MODULO -> va a MODULOS
+        Si dice HORAS CATEDRA -> va a HORAS_CATEDRA
+        """
+        carga_num = pd.to_numeric(carga, errors="coerce")
+        if pd.isna(carga_num):
+            return "", ""
+
+        carga_num = int(carga_num)
+        nivel_txt = normalizar_texto(nivel_ensenanza_pdf)
+
+        horas_catedra = ""
+        modulos = ""
+
+        if "HORAS MODULO" in nivel_txt:
+            modulos = carga_num
+        elif "HORAS DE CATEDRA" in nivel_txt:
+            horas_catedra = carga_num
+
+        return horas_catedra, modulos
+
+    texto = ""
     with pdfplumber.open(pdf_file) as pdf:
         for pagina in pdf.pages:
             texto += "\n" + (pagina.extract_text() or "")
 
-    # Solo trabajar sobre el historial
     ini = texto.find("HISTORIAL DE PERÍODOS LABORALES")
-
     if ini == -1:
         ini = texto.find("HISTORIAL DE PERIODOS LABORALES")
 
     if ini == -1:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=[
+            "SECUENCIA",
+            "NIVEL_ENSENANZA_PDF",
+            "NIVEL_PDF",
+            "NIVEL",
+            "ESCUELA",
+            "CARGO",
+            "CARGA HORARIA",
+            "HORAS_CATEDRA",
+            "MODULOS",
+            "DESDE",
+            "HASTA",
+        ])
 
-    fin = texto.find("OTROS SERVICIOS", ini)
+    # ---------------------------------------------------------
+    # FIN DEL HISTORIAL
+    # ---------------------------------------------------------
+    candidatos_fin = []
+    for marca in [
+        "CESE DEFINITIVO",
+        "CARGO DE MAYOR JERARQUÍA",
+        "CARGO DE MAYOR JERARQUIA",
+        "El empleador extiende la presente certificación",
+    ]:
+        pos = texto.find(marca, ini)
+        if pos != -1:
+            candidatos_fin.append(pos)
 
-    if fin == -1:
-        fin = len(texto)
+    fin = min(candidatos_fin) if candidatos_fin else len(texto)
 
     historial = texto[ini:fin]
+    lineas = historial.splitlines()
 
     filas = []
 
-    patron = re.compile(
-        r"""
-        (?P<nivel>PREESCOLAR|PRIMARIA|SECUNDARIA|SUPERIOR|ESPECIAL|ADULTOS)
-
-        \s+
-
-        (?P<resto>.*?)
-
-        \((?P<secuencia>\d+)\)
-
-        \s+
-
-        (?P<desde>\d{2}/\d{2}/\d{4})
-
-        \s+
-
-        (?P<hasta>\d{2}/\d{2}/\d{4})
-
-        \s+
-
-        (?P<anios>\d+)
-
-        \s+
-
-        (?P<meses>\d+)
-
-        \s+
-
-        (?P<dias>\d+)
-
-        """,
-        re.VERBOSE,
-    )
-
-    palabras_cargo = [
-        "VICE DIRECTOR",
-        "DIRECTOR",
-        "SECRETARIO",
-        "PROSECRETARIO",
-        "REGENTE",
-        "SUBREGENTE",
-        "JEFE",
-        "PRECEPTOR",
-        "MAESTRO",
-        "PROFESOR",
-        "BIBLIOTECARIO",
+    textos_ignorar = [
+        "HISTORIAL DE PERÍODOS LABORALES",
+        "HISTORIAL DE PERIODOS LABORALES",
+        "CUIL:",
+        "APELLIDO Y NOMBRE:",
+        "CÓD. EMPLEADOR:",
+        "COD. EMPLEADOR:",
+        "EMPLEADOR:",
+        "NIVEL ENSEÑANZA",
+        "ESTABLECIMIENTO",
+        "CARGO HORAS DESDE HASTA",
+        "AÑOS MESES DIAS",
+        "AÑOS MESES DÍAS",
+        "TOTAL DE SERVICIOS",
+        "TOTAL DE SERVICIOS DOCENTES",
+        "TOTAL DE SERVICIOS DOCENTES TITULARES",
+        "TOTAL DE SERVICIOS DOCENTES SUPLENTES",
+        "CARGO DE MAYOR JERARQUÍA",
+        "CARGO DE MAYOR JERARQUIA",
+        "BONIFICACIONES",
+        "DESCUENTOS PRACTICADOS",
+        "TIPO DE SERVICIO",
+        "LICENCIAS",
+        "SERVICIOS DOCENTES TITULARES",
+        "SERVICIOS DOCENTES SUPLENTES Y/O PROVISIONALES",
+        "SERVICIOS PRESTADOS REMUNERADOS",
+        "AGRUPAMIENTO",
+        "OTRAS BONIFICACIONES",
+        "DESIGNACIÓN:",
+        "DESIGNACION:",
+        "CARGO NUMERO DE CARGO",
+        "NUMERO DE CARGO:",
+        "FECHA DEL ACTA",
     ]
 
-    for m in patron.finditer(historial):
+    palabras_cargo = [
+        "ENCARGADO DE MEDIOS DE APOYO TEC. PEDAGOGICOS",
+        "ENCARGADO DE MEDIOS DE APOYO TÉC. PEDAGÓGICOS",
+        "PROFESOR HS. MODULO MEDIA",
+        "PROFESOR HS. MÓDULO MEDIA",
+        "PROFESOR HS. MODULO EGB",
+        "PROFESOR HS. MÓDULO EGB",
+        "PROFESOR DE EDUCACION FISICA",
+        "PROFESOR DE EDUCACIÓN FÍSICA",
+        "MAESTRO DE SECCION",
+        "MAESTRO DE GRADO",
+        "VICE DIRECTOR",
+        "VICEDIRECTOR",
+        "PROSECRETARIO",
+        "SUBREGENTE",
+        "BIBLIOTECARIO",
+        "SECRETARIO",
+        "PRECEPTOR",
+        "DIRECTOR",
+        "REGENTE",
+        "PROFESOR",
+        "MAESTRO",
+        "JEFE",
+    ]
+    palabras_cargo = sorted(palabras_cargo, key=len, reverse=True)
 
-        resto = m.group("resto").strip()
+    prefijos_no_establecimiento = [
+        "ENSEÑANZA TECNICA Y FORMACION PROFESIONAL; ARTISTICA; SUPERIOR; MEDIA; AGRARIA; SECUNDARIA",
+        "ENSEÑANZA TÉCNICA Y FORMACIÓN PROFESIONAL; ARTÍSTICA; SUPERIOR; MEDIA; AGRARIA; SECUNDARIA",
+        "HORAS DE CATEDRA"
+        "HORAS CATEDRA",
+        "HORAS MODULO",
+        "PREESCOLAR",
+        "PRIMARIA",
+        "SECUNDARIA",
+        "SUPERIOR",
+        "ESPECIAL",
+        "ADULTOS",
+        "INICIAL",
+        "INSTRUCTOR"
+    ]
+    prefijos_no_establecimiento = sorted(prefijos_no_establecimiento, key=len, reverse=True)
 
-        pos = -1
+    for linea in lineas:
+        linea = re.sub(r"\s+", " ", linea).strip()
+        if not linea:
+            continue
 
-        # Buscar primero las cadenas más largas
-        for palabra in sorted(palabras_cargo, key=len, reverse=True):
+        linea_upper = normalizar_texto(linea)
 
-            p = resto.upper().find(palabra)
+        if any(normalizar_texto(t) in linea_upper for t in textos_ignorar):
+            continue
 
-            if p != -1:
-                pos = p
+        sec_match = re.search(r"\((\d+)\)", linea)
+        fechas = re.findall(r"\d{2}/\d{2}/\d{4}", linea)
+
+        if not sec_match or len(fechas) < 2:
+            continue
+
+        secuencia = sec_match.group(1)
+        desde = fechas[0]
+        hasta = fechas[1]
+
+        idx_seq = linea.find(f"({secuencia})")
+        if idx_seq == -1:
+            continue
+
+        antes_seq = linea[:idx_seq].strip()
+        despues_seq = linea[idx_seq + len(f"({secuencia})"):].strip()
+
+        # ---------------------------------------------------------
+        # CARGA HORARIA: número que está después de (secuencia)
+        # ---------------------------------------------------------
+        carga = ""
+        m_carga = re.match(r"(\d{1,2})\s+\d{2}/\d{2}/\d{4}", despues_seq)
+        if m_carga:
+            carga = m_carga.group(1)
+
+        texto_base = antes_seq
+        texto_norm = normalizar_texto(texto_base)
+
+        nivel_ensenanza_pdf = ""
+        resto = texto_base
+
+        for pref in prefijos_no_establecimiento:
+            pref_norm = normalizar_texto(pref)
+            if texto_norm.startswith(pref_norm):
+                nivel_ensenanza_pdf = pref
+                resto = texto_base[len(pref):].strip(" -")
                 break
 
-        if pos == -1:
-            escuela = resto
-            cargo = ""
+        resto_upper = normalizar_texto(resto)
+        pos_cargo = -1
+
+        for palabra in palabras_cargo:
+            palabra_norm = normalizar_texto(palabra)
+            p = resto_upper.rfind(palabra_norm)
+            if p > pos_cargo:
+                pos_cargo = p
+
+        if pos_cargo != -1:
+            escuela = resto[:pos_cargo].strip(" -")
+            cargo = resto[pos_cargo:].strip(" -")
         else:
-            escuela = resto[:pos].strip()
-            cargo = resto[pos:].strip()
+            escuela = resto.strip(" -")
+            cargo = ""
+
+        escuela = re.sub(r"\s+", " ", escuela).strip(" -")
+        cargo = re.sub(r"\s+", " ", cargo).strip(" -")
+        cargo = re.sub(r"\s*\(\d+\)\s*$", "", cargo).strip()
+
+        nivel_pdf = extraer_nivel_pdf_desde_establecimiento(escuela)
+        nivel = homologar_nivel(nivel_pdf, escuela)
+
+        horas_catedra, modulos = repartir_carga_por_tipo(carga, nivel_ensenanza_pdf)
 
         filas.append({
-
-            "SECUENCIA": m.group("secuencia"),
-
+            "SECUENCIA": secuencia,
+            "NIVEL_ENSENANZA_PDF": nivel_ensenanza_pdf,
+            "NIVEL_PDF": nivel_pdf,
+            "NIVEL": nivel,
             "ESCUELA": escuela,
-
             "CARGO": cargo,
-
-            "CARGA HORARIA": "",
-
-            "DESDE": m.group("desde"),
-
-            "HASTA": m.group("hasta"),
-
+            "CARGA HORARIA": carga,
+            "HORAS_CATEDRA": horas_catedra,
+            "MODULOS": modulos,
+            "DESDE": desde,
+            "HASTA": hasta,
         })
 
-    df = pd.DataFrame(filas)
+    df = pd.DataFrame(filas, columns=[
+        "SECUENCIA",
+        "NIVEL_ENSENANZA_PDF",
+        "NIVEL_PDF",
+        "NIVEL",
+        "ESCUELA",
+        "CARGO",
+        "CARGA HORARIA",
+        "HORAS_CATEDRA",
+        "MODULOS",
+        "DESDE",
+        "HASTA",
+    ])
 
     if df.empty:
         return df
 
-    df = df.drop_duplicates()
+    df = df.drop_duplicates().copy()
+    df["SECUENCIA"] = pd.to_numeric(df["SECUENCIA"], errors="coerce")
+    df["DESDE"] = pd.to_datetime(df["DESDE"], dayfirst=True, errors="coerce")
+    df["HASTA"] = pd.to_datetime(df["HASTA"], dayfirst=True, errors="coerce")
 
-    df["DESDE"] = pd.to_datetime(
-        df["DESDE"],
-        dayfirst=True,
-        errors="coerce",
-    )
-
-    df["HASTA"] = pd.to_datetime(
-        df["HASTA"],
-        dayfirst=True,
-        errors="coerce",
-    )
-
+    df = df.sort_values(["DESDE", "SECUENCIA"], na_position="last").reset_index(drop=True)
     return df
+
 
 def main():
     st.title("Ficha de Carga de Datos")
@@ -640,13 +1123,32 @@ div.stButton > button {
                     st.error(f"Error al leer el PDF {pdf.name}: {e}")
 
         if not hoja_vida.empty:
-            df_periodos = corte_con_licencias(
-                hoja_vida,
-                hoja_licencias,
-                CODIGOS_VALIDOS,
-            )
+    # =========================================================
+    # COMPLETAR NIVEL + HORAS_CATEDRA + MODULOS
+    # para Excel / Pegado / PDF
+    # =========================================================
+            hoja_vida = completar_carga_y_nivel_hoja_vida(hoja_vida)
 
+            df_periodos = corte_con_licencias(
+        hoja_vida,
+        hoja_licencias,
+        CODIGOS_VALIDOS,
+        )
             df_consolidado = consolidar_periodos_continuos(df_periodos)
+
+            # =========================================================
+            # COMPLETAR NIVEL DESDE ESCUELA EN EL CONSOLIDADO
+            # =========================================================
+            if "ESCUELA" in df_consolidado.columns:
+                if "NIVEL" not in df_consolidado.columns:
+                    df_consolidado["NIVEL"] = ""
+
+                mask_sin_nivel = df_consolidado["NIVEL"].astype(str).str.strip().eq("")
+                df_consolidado.loc[mask_sin_nivel, "NIVEL"] = (
+                    df_consolidado.loc[mask_sin_nivel, "ESCUELA"]
+                    .apply(detectar_nivel_desde_escuela)
+                )
+
             df_consolidado_filtrado = df_consolidado.copy()
 
             st.session_state["df_periodos"] = df_periodos

@@ -16,18 +16,34 @@ import pandas as pd
 # 5. Devuelve una tabla con todos los cortes resultantes por secuencia.
 # Esta función es el corazón del cálculo de periodos reales trabajados.
 def corte_con_licencias(hoja_vida, hoja_licencias, CODIGOS_VALIDOS):
+    import pandas as pd
 
+    # =========================================================
     # Normalizar nombres de columnas
-    hoja_vida.columns = hoja_vida.columns.astype(str).str.upper().str.strip()
-    hoja_licencias.columns = hoja_licencias.columns.str.upper().str.strip()
+    # =========================================================
+    hoja_vida = hoja_vida.copy()
+    hoja_licencias = hoja_licencias.copy()
 
-    # Identificación de columnas
+    hoja_vida.columns = hoja_vida.columns.astype(str).str.upper().str.strip()
+    hoja_licencias.columns = hoja_licencias.columns.astype(str).str.upper().str.strip()
+
+    # =========================================================
+    # Identificación de columnas base
+    # =========================================================
     col_secuencia = next((c for c in hoja_vida.columns if "SECUENCIA" in c), None)
-    col_escuela = next((c for c in hoja_vida.columns if "ESCUELA" in c), None)
-    col_cargo = next((c for c in hoja_vida.columns if "CARGO" in c), None)
-    col_desde = next((c for c in hoja_vida.columns if "DESDE" in c), None)
-    col_hasta = next((c for c in hoja_vida.columns if "HASTA" in c), None)
-    col_carga = next((c for c in hoja_vida.columns if "CARGA" in c), None)
+    col_escuela   = next((c for c in hoja_vida.columns if "ESCUELA" in c), None)
+    col_cargo     = next((c for c in hoja_vida.columns if "CARGO" in c), None)
+    col_desde     = next((c for c in hoja_vida.columns if "DESDE" in c), None)
+    col_hasta     = next((c for c in hoja_vida.columns if "HASTA" in c), None)
+    col_carga     = next((c for c in hoja_vida.columns if "CARGA" in c), None)
+
+    # =========================================================
+    # NUEVAS COLUMNAS OPCIONALES
+    # Si vienen del PDF, las conservamos
+    # =========================================================
+    col_nivel = next((c for c in hoja_vida.columns if c == "NIVEL"), None)
+    col_horas_catedra = next((c for c in hoja_vida.columns if "HORAS_CATEDRA" in c), None)
+    col_modulos = next((c for c in hoja_vida.columns if "MODULOS" in c), None)
 
     columnas_faltantes = [
         name
@@ -47,28 +63,72 @@ def corte_con_licencias(hoja_vida, hoja_licencias, CODIGOS_VALIDOS):
 
     hoy = pd.Timestamp.today().normalize()
 
-    # Normalizar fechas
+    # =========================================================
+    # Normalizar fechas hoja_vida
+    # =========================================================
     hoja_vida[col_desde] = pd.to_datetime(
         hoja_vida[col_desde], dayfirst=True, errors="coerce"
     )
+
     hoja_vida[col_hasta] = hoja_vida[col_hasta].replace("HOY", hoy)
     hoja_vida[col_hasta] = pd.to_datetime(
         hoja_vida[col_hasta], dayfirst=True, errors="coerce"
     )
 
+    # =========================================================
+    # Normalizar fechas hoja_licencias
+    # =========================================================
     hoja_licencias["DESDE"] = pd.to_datetime(
         hoja_licencias["DESDE"], dayfirst=True, errors="coerce"
     )
+
     hoja_licencias["HASTA"] = hoja_licencias["HASTA"].replace("HOY", hoy)
     hoja_licencias["HASTA"] = pd.to_datetime(
         hoja_licencias["HASTA"], dayfirst=True, errors="coerce"
     )
 
+    # =========================================================
     # Normalizar CODIGOS_VALIDOS como string
+    # =========================================================
     CODIGOS_VALIDOS = [str(c).strip() for c in CODIGOS_VALIDOS]
 
     nueva_tabla = []
 
+    # =========================================================
+    # Helper para agregar fila manteniendo columnas extra
+    # =========================================================
+    def agregar_fila(
+        secuencia,
+        cargo,
+        fecha_desde,
+        fecha_hasta,
+        escuela,
+        carga_horaria,
+        nivel="",
+        horas_catedra="",
+        modulos="",
+    ):
+        diff = (fecha_hasta - fecha_desde).days + 1
+
+        nueva_tabla.append([
+            secuencia,
+            cargo,
+            fecha_desde,
+            fecha_hasta,
+            diff,
+            diff // 365,
+            (diff % 365) // 30,
+            (diff % 365) % 30,
+            escuela,
+            carga_horaria,
+            nivel,
+            horas_catedra,
+            modulos,
+        ])
+
+    # =========================================================
+    # Recorrido hoja_vida
+    # =========================================================
     for _, fila in hoja_vida.iterrows():
 
         secuencia = fila[col_secuencia]
@@ -78,7 +138,26 @@ def corte_con_licencias(hoja_vida, hoja_licencias, CODIGOS_VALIDOS):
         fecha_desde = fila[col_desde]
         fecha_hasta = fila[col_hasta]
 
+        # nuevas columnas si existen
+        nivel = fila[col_nivel] if col_nivel and col_nivel in fila.index else ""
+        horas_catedra = fila[col_horas_catedra] if col_horas_catedra and col_horas_catedra in fila.index else ""
+        modulos = fila[col_modulos] if col_modulos and col_modulos in fila.index else ""
+
+        # -----------------------------------------------------
+        # Si no vienen horas/modulos pero hay carga_horaria,
+        # dejamos valores vacíos acá; luego el extractor PDF ya
+        # debería haberlos llenado.
+        # -----------------------------------------------------
+        if pd.isna(nivel):
+            nivel = ""
+        if pd.isna(horas_catedra):
+            horas_catedra = ""
+        if pd.isna(modulos):
+            modulos = ""
+
+        # =====================================================
         # Reemplazar fechas faltantes
+        # =====================================================
         if pd.isna(fecha_desde) and pd.isna(fecha_hasta):
             fecha_desde = fecha_hasta = hoy
         elif pd.isna(fecha_desde):
@@ -90,123 +169,109 @@ def corte_con_licencias(hoja_vida, hoja_licencias, CODIGOS_VALIDOS):
         if fecha_desde > fecha_hasta:
             fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
 
-            # ------------------------------------------
-        # 🔒 PDF: si la secuencia es >= 1000, NO cortar
-        # ------------------------------------------
+        # =====================================================
+        # PDF: si la secuencia es >= 1000, NO cortar
+        # =====================================================
         if str(secuencia).isdigit() and int(secuencia) >= 1000:
-            # Si falta alguna fecha se corrige igual que en el resto
-            if pd.isna(fecha_desde) and pd.isna(fecha_hasta):
-                fecha_desde = fecha_hasta = hoy
-            elif pd.isna(fecha_desde):
-                fecha_desde = fecha_hasta
-            elif pd.isna(fecha_hasta):
-                fecha_hasta = fecha_desde
-
-            # Corregir fechas invertidas
-            if fecha_desde > fecha_hasta:
-                fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
-
-            diff = (fecha_hasta - fecha_desde).days + 1
-
-            nueva_tabla.append(
-                [
-                    secuencia,
-                    cargo,
-                    fecha_desde,
-                    fecha_hasta,
-                    diff,
-                    diff // 365,
-                    (diff % 365) // 30,
-                    (diff % 365) % 30,
-                    escuela,
-                    carga_horaria,
-                ]
+            agregar_fila(
+                secuencia=secuencia,
+                cargo=cargo,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+                escuela=escuela,
+                carga_horaria=carga_horaria,
+                nivel=nivel,
+                horas_catedra=horas_catedra,
+                modulos=modulos,
             )
             continue
 
+        # =====================================================
         # Filtrar licencias
+        # =====================================================
         licencias_rel = hoja_licencias[
             (hoja_licencias["SECUENCIA"] == secuencia)
             & (hoja_licencias["ENCUADRE"].astype(str).isin(CODIGOS_VALIDOS))
         ]
+
         if "ESCUELA" in hoja_licencias.columns:
             licencias_rel = licencias_rel[licencias_rel["ESCUELA"] == escuela]
 
         periodos_cortados = [
             (d["DESDE"], d["HASTA"]) for _, d in licencias_rel.iterrows()
         ]
+
+        # =====================================================
         # Validar fechas
+        # =====================================================
         if pd.isna(fecha_desde) and not pd.isna(fecha_hasta):
             fecha_desde = fecha_hasta - pd.Timedelta(days=int(fila.get("DIAS", 0)) - 1)
         elif pd.isna(fecha_hasta) and not pd.isna(fecha_desde):
             fecha_hasta = fecha_desde + pd.Timedelta(days=int(fila.get("DIAS", 0)) - 1)
         elif pd.isna(fecha_desde) and pd.isna(fecha_hasta):
-            fecha_desde = fecha_hasta = hoy  # fallback
+            fecha_desde = fecha_hasta = hoy
+
+        # =====================================================
         # Si no hay licencias, agregar todo
+        # =====================================================
         if not periodos_cortados:
-            diff = (fecha_hasta - fecha_desde).days + 1
-            nueva_tabla.append(
-                [
-                    secuencia,
-                    cargo,
-                    fecha_desde,
-                    fecha_hasta,
-                    diff,
-                    diff // 365,
-                    (diff % 365) // 30,
-                    (diff % 365) % 30,
-                    escuela,
-                    carga_horaria,
-                ]
+            agregar_fila(
+                secuencia=secuencia,
+                cargo=cargo,
+                fecha_desde=fecha_desde,
+                fecha_hasta=fecha_hasta,
+                escuela=escuela,
+                carga_horaria=carga_horaria,
+                nivel=nivel,
+                horas_catedra=horas_catedra,
+                modulos=modulos,
             )
             continue
 
+        # =====================================================
         # Intersección de licencias
+        # =====================================================
         lic_dentro = [
             (max(fecha_desde, d), min(fecha_hasta, h))
             for (d, h) in periodos_cortados
             if fecha_hasta >= d and fecha_desde <= h
         ]
         lic_dentro.sort(key=lambda x: x[0])
+
         inicio = fecha_desde
 
         for lic_desde, lic_hasta in lic_dentro:
-            # Excluir día de licencia
             nuevo_hasta = lic_desde - pd.Timedelta(days=1)
+
             if inicio <= nuevo_hasta:
-                diff = (nuevo_hasta - inicio).days + 1
-                nueva_tabla.append(
-                    [
-                        secuencia,
-                        cargo,
-                        inicio,
-                        nuevo_hasta,
-                        diff,
-                        diff // 365,
-                        (diff % 365) // 30,
-                        (diff % 365) % 30,
-                        escuela,
-                        carga_horaria,
-                    ]
+                agregar_fila(
+                    secuencia=secuencia,
+                    cargo=cargo,
+                    fecha_desde=inicio,
+                    fecha_hasta=nuevo_hasta,
+                    escuela=escuela,
+                    carga_horaria=carga_horaria,
+                    nivel=nivel,
+                    horas_catedra=horas_catedra,
+                    modulos=modulos,
                 )
+
             inicio = lic_hasta + pd.Timedelta(days=1)
 
+        # =====================================================
         # Último tramo
+        # =====================================================
         if inicio <= fecha_hasta:
-            diff = (fecha_hasta - inicio).days + 1
-            nueva_tabla.append(
-                [
-                    secuencia,
-                    cargo,
-                    inicio,
-                    fecha_hasta,
-                    diff,
-                    diff // 365,
-                    (diff % 365) // 30,
-                    (diff % 365) % 30,
-                    escuela,
-                    carga_horaria,
-                ]
+            agregar_fila(
+                secuencia=secuencia,
+                cargo=cargo,
+                fecha_desde=inicio,
+                fecha_hasta=fecha_hasta,
+                escuela=escuela,
+                carga_horaria=carga_horaria,
+                nivel=nivel,
+                horas_catedra=horas_catedra,
+                modulos=modulos,
             )
 
     columnas = [
@@ -220,8 +285,25 @@ def corte_con_licencias(hoja_vida, hoja_licencias, CODIGOS_VALIDOS):
         "DIAS_RESTANTES",
         "ESCUELA",
         "CARGA HORARIA",
+        "NIVEL",
+        "HORAS_CATEDRA",
+        "MODULOS",
     ]
-    return pd.DataFrame(nueva_tabla, columns=columnas)
+
+    df_resultado = pd.DataFrame(nueva_tabla, columns=columnas)
+
+    # Limpieza final opcional
+    if "HORAS_CATEDRA" in df_resultado.columns:
+        df_resultado["HORAS_CATEDRA"] = pd.to_numeric(
+            df_resultado["HORAS_CATEDRA"], errors="coerce"
+        )
+
+    if "MODULOS" in df_resultado.columns:
+        df_resultado["MODULOS"] = pd.to_numeric(
+            df_resultado["MODULOS"], errors="coerce"
+        )
+
+    return df_resultado
 
 
 import pandas as pd

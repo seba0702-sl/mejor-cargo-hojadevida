@@ -30,7 +30,7 @@ CODIGOS_VALIDOS = [
     "114D111",
     "115D1",
     "115C1",
-    "115B1",
+    #"115B1",
     "1252",
     "CAUSAS PARTICULARES",
     "114F1",
