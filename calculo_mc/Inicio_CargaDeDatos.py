@@ -281,8 +281,8 @@ def completar_carga_y_nivel_hoja_vida(df):
         df["MODULOS"],
         errors="coerce"
     ).fillna(0).astype("Int64")
-    st.write("TIPOS DENTRO DE completar_carga_y_nivel_hoja_vida")
-    st.write(df[["NIVEL","HORAS_CATEDRA","MODULOS"]].dtypes)
+    #st.write("TIPOS DENTRO DE completar_carga_y_nivel_hoja_vida")
+    #st.write(df[["NIVEL","HORAS_CATEDRA","MODULOS"]].dtypes)
     col_escuela = next((c for c in df.columns if "ESCUELA" in c), None)
     col_cargo = next((c for c in df.columns if "CARGO" in c), None)
     col_carga = next((c for c in df.columns if "CARGA" in c), None)
@@ -1150,20 +1150,7 @@ div.stButton > button {
     # COMPLETAR NIVEL + HORAS_CATEDRA + MODULOS
     # para Excel / Pegado / PDF
     # =========================================================
-            st.write("========== DEBUG ==========")
-            st.write(hoja_vida.dtypes)
-
-            st.write(
-    hoja_vida[[
-        c for c in hoja_vida.columns
-        if c in ["CARGA HORARIA","HORAS_CATEDRA","MODULOS"]
-    ]]
-)
-
-            
-
-            for c in hoja_vida.columns:
-                st.write(c, hoja_vida[c].dtype)
+           
             hoja_vida = completar_carga_y_nivel_hoja_vida(hoja_vida)
 
             df_periodos = corte_con_licencias(
