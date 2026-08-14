@@ -255,7 +255,8 @@ def completar_carga_y_nivel_hoja_vida(df):
     for col in ["NIVEL", "HORAS_CATEDRA", "MODULOS"]:
         if col not in df.columns:
             df[col] = ""
-
+    st.write("TIPOS DENTRO DE completar_carga_y_nivel_hoja_vida")
+    st.write(df[["NIVEL","HORAS_CATEDRA","MODULOS"]].dtypes)
     col_escuela = next((c for c in df.columns if "ESCUELA" in c), None)
     col_cargo = next((c for c in df.columns if "CARGO" in c), None)
     col_carga = next((c for c in df.columns if "CARGA" in c), None)
