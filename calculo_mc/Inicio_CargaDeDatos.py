@@ -252,9 +252,35 @@ def completar_carga_y_nivel_hoja_vida(df):
     df.columns = df.columns.astype(str).str.upper().str.strip()
 
     # asegurar columnas
-    for col in ["NIVEL", "HORAS_CATEDRA", "MODULOS"]:
-        if col not in df.columns:
-            df[col] = ""
+    # NIVEL (texto)
+    if "NIVEL" not in df.columns:
+        df["NIVEL"] = ""
+
+# HORAS_CATEDRA (numérico)
+    if "HORAS_CATEDRA" not in df.columns:
+        df["HORAS_CATEDRA"] = pd.Series(
+        0,
+        index=df.index,
+        dtype="Int64"
+    )
+    else:
+        df["HORAS_CATEDRA"] = pd.to_numeric(
+        df["HORAS_CATEDRA"],
+        errors="coerce"
+    ).fillna(0).astype("Int64")
+
+# MODULOS (numérico)
+    if "MODULOS" not in df.columns:
+        df["MODULOS"] = pd.Series(
+        0,
+        index=df.index,
+        dtype="Int64"
+    )
+    else:
+        df["MODULOS"] = pd.to_numeric(
+        df["MODULOS"],
+        errors="coerce"
+    ).fillna(0).astype("Int64")
     st.write("TIPOS DENTRO DE completar_carga_y_nivel_hoja_vida")
     st.write(df[["NIVEL","HORAS_CATEDRA","MODULOS"]].dtypes)
     col_escuela = next((c for c in df.columns if "ESCUELA" in c), None)
@@ -294,14 +320,10 @@ def completar_carga_y_nivel_hoja_vida(df):
             tipo = detectar_tipo_carga_desde_fila(escuela, cargo, nivel)
 
             if tipo == "MODULOS":
-                df.at[i, "MODULOS"] = carga
-                if not str(df.at[i, "HORAS_CATEDRA"]).strip():
-                    df.at[i, "HORAS_CATEDRA"] = ""
+                df.at[i, "MODULOS"] = int(carga)
 
             elif tipo == "HORAS_CATEDRA":
-                df.at[i, "HORAS_CATEDRA"] = carga
-                if not str(df.at[i, "MODULOS"]).strip():
-                    df.at[i, "MODULOS"] = ""
+                df.at[i, "HORAS_CATEDRA"] = int(carga)
 
     return df
 
