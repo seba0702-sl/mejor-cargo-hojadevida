@@ -20,6 +20,7 @@ def normalizar_fechas(df):
     hoy = pd.Timestamp.today().normalize()
 
     def parse_fecha(x):
+        
         if pd.isna(x):
             return pd.NaT
 
