@@ -13,7 +13,7 @@ from services.constants import (
 )
 
 st.set_page_config(page_title="Inicio - Carga de datos", layout="wide")
-st.title("Sistema para calculo y eleccion mejor cargo")
+st.title("SISTEMA PARA CALCULO Y ELECCION MEJOR CARGO")
 
 
 def normalizar_fechas(df):
