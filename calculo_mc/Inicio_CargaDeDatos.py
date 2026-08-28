@@ -61,17 +61,45 @@ def normalizar_df(df, encabezados):
 
 def cargar_hoja_excel(archivo, nombre_hoja, encabezados=None):
     try:
-        df = pd.read_excel(archivo, sheet_name=nombre_hoja, header=None)
+        df = pd.read_excel(
+    archivo,
+    sheet_name=nombre_hoja,
+    header=None,
+    dtype=str,
+    engine="openpyxl"
+)
+        st.subheader(f"DEBUG - {nombre_hoja}")
+        st.write("Tipos luego del read_excel")
+        st.write(df.dtypes)
 
+        st.write("Primeras filas")
+        st.dataframe(df.head(10))
         if encabezados is not None:
             df = df.iloc[:, : len(encabezados)]
             df.columns = encabezados
         else:
             df.columns = [f"col_{i}" for i in range(df.shape[1])]
+        st.write("ANTES de normalizar")
 
+        if "DESDE" in df.columns:
+            st.dataframe(df[["SECUENCIA","DESDE","HASTA"]].head(20))
+
+            st.write("Tipos DESDE")
+            st.write(df["DESDE"].map(type).value_counts())
+
+            st.write("Tipos HASTA")
+            st.write(df["HASTA"].map(type).value_counts())
         df = df.dropna(how="all")
         df = normalizar_fechas(df)
+        st.write("DESPUES de normalizar")
 
+        st.dataframe(df[["SECUENCIA","DESDE","HASTA"]].head(20))
+
+        st.write("Tipos DESDE")
+        st.write(df["DESDE"].map(type).value_counts())
+
+        st.write("Tipos HASTA")
+        st.write(df["HASTA"].map(type).value_counts())
         return df
 
     except Exception as e:
@@ -1092,7 +1120,13 @@ div.stButton > button {
                     "Hoja1",
                     ENCABEZADOS_VIDA,
                 )
+                st.subheader("DEBUG - hoja_vida_excel")
 
+                st.dataframe(
+                hoja_vida_excel[
+        ["SECUENCIA","DESDE","HASTA"]
+    ].head(20)
+)
                 hoja_licencias_excel = cargar_hoja_excel(
                     archivo_excel,
                     "Hoja2",
@@ -1153,14 +1187,33 @@ div.stButton > button {
     # =========================================================
            
             hoja_vida = completar_carga_y_nivel_hoja_vida(hoja_vida)
+            st.subheader("DEBUG - hoja_vida antes del corte")
 
+            st.dataframe(
+            hoja_vida[
+        ["SECUENCIA","DESDE","HASTA"]
+    ].head(20)
+)
             df_periodos = corte_con_licencias(
         hoja_vida,
         hoja_licencias,
         CODIGOS_VALIDOS,
         )
-            df_consolidado = consolidar_periodos_continuos(df_periodos)
+            st.subheader("DEBUG - resultado corte")
 
+            st.dataframe(
+    df_periodos[
+        ["SECUENCIA","DESDE","HASTA"]
+    ].head(20)
+)
+            df_consolidado = consolidar_periodos_continuos(df_periodos)
+            st.subheader("DEBUG - consolidado")
+
+            st.dataframe(
+            df_consolidado[
+        ["SECUENCIA","DESDE","HASTA"]
+    ].head(20)
+)
             # =========================================================
             # COMPLETAR NIVEL DESDE ESCUELA EN EL CONSOLIDADO
             # =========================================================
