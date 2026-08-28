@@ -159,27 +159,65 @@ def calcular_tramo_comun_mejor(df_mejor):
 
 
 def construir_mejor_cargo_real(df_mejor):
+
     if df_mejor is None or df_mejor.empty:
         return pd.DataFrame()
 
     tramo = calcular_tramo_comun_mejor(df_mejor)
+
     if tramo is None:
         return pd.DataFrame()
 
+    desde = tramo["DESDE_COMUN"]
+    hasta = tramo["HASTA_COMUN"]
+
+    # Buscar la fila vigente durante el período común
+    vigente = df_mejor[
+        (pd.to_datetime(df_mejor["DESDE"]) <= desde) &
+        (pd.to_datetime(df_mejor["HASTA"]) >= desde)
+    ].copy()
+
+    if vigente.empty:
+        vigente = df_mejor[
+            (pd.to_datetime(df_mejor["DESDE"]) <= hasta) &
+            (pd.to_datetime(df_mejor["HASTA"]) >= hasta)
+        ].copy()
+
+    if vigente.empty:
+        vigente = (
+            df_mejor
+            .sort_values("DESDE")
+            .iloc[[0]]
+        )
+
+    fila_vigente = vigente.iloc[0]
+
     fila = {
-        "SECUENCIAS_ORIGEN": " / ".join(sorted(set(df_mejor["SECUENCIA"].astype(str).tolist()))),
-        "NIVELES_ORIGEN": " / ".join(sorted(set(df_mejor["NIVEL"].astype(str).tolist()))) if "NIVEL" in df_mejor.columns else "",
-        "DESDE_COMUN": tramo["DESDE_COMUN"],
-        "HASTA_COMUN": tramo["HASTA_COMUN"],
+
+        "SECUENCIAS_ORIGEN":
+            " / ".join(sorted(set(df_mejor["SECUENCIA"].astype(str)))),
+
+        "NIVELES_ORIGEN":
+            " / ".join(sorted(set(df_mejor["NIVEL"].astype(str))))
+            if "NIVEL" in df_mejor.columns else "",
+
+        "DESDE_COMUN": desde,
+        "HASTA_COMUN": hasta,
+
         "HAY_SOLAPE": tramo["HAY_SOLAPE"],
         "DIAS_COMUN": tramo["DIAS_COMUN"],
         "MESES_COMUN": tramo["MESES_COMUN"],
-        "BARRAS_ORIGEN": " / ".join(sorted(set(df_mejor["BAR_ID"].astype(str).tolist()))),
-        "CARGOS": " / ".join(sorted(set(df_mejor["CARGO"].dropna().astype(str).tolist()))) if "CARGO" in df_mejor.columns else "",
-        "ESCUELAS": " / ".join(sorted(set(df_mejor["ESCUELA"].dropna().astype(str).tolist()))) if "ESCUELA" in df_mejor.columns else "",
-        "HORAS_CATEDRA_TOTAL_BARRAS": pd.to_numeric(df_mejor["HORAS_CATEDRA"], errors="coerce").fillna(0).sum() if "HORAS_CATEDRA" in df_mejor.columns else 0,
-        "MODULOS_TOTAL_BARRAS": pd.to_numeric(df_mejor["MODULOS"], errors="coerce").fillna(0).sum() if "MODULOS" in df_mejor.columns else 0,
-        "CANT_BARRAS": len(df_mejor)
+
+        "BARRAS_ORIGEN":
+            " / ".join(sorted(set(df_mejor["BAR_ID"].astype(str)))),
+
+        # SOLO EL CARGO VIGENTE
+        "CARGO": fila_vigente.get("CARGO", ""),
+        "ESCUELA": fila_vigente.get("ESCUELA", ""),
+        "HORAS_CATEDRA": fila_vigente.get("HORAS_CATEDRA", 0),
+        "MODULOS": fila_vigente.get("MODULOS", 0),
+
+        "CANT_BARRAS": len(df_mejor),
     }
 
     return pd.DataFrame([fila])
@@ -452,17 +490,30 @@ def exportar_excel(df_mejor, df_sim, df_resumen):
 
 def consolidar_periodos(df_in):
     """
-    Consolida periodos continuos por SECUENCIA
-    y devuelve barras del gráfico original + metadata para selección.
+    Consolida períodos continuos por SECUENCIA.
+
+    Une únicamente los períodos para graficarlos, pero NO suma
+    horas ni módulos porque representan cargos distintos dentro
+    de una misma trayectoria.
+
+    Conserva:
+        - listado de cargos
+        - listado de escuelas
+        - historial de cargas
+        - última carga (la vigente al finalizar la barra)
     """
+
     if df_in.empty:
         return pd.DataFrame()
 
     df_in = df_in.sort_values(["SECUENCIA", "DESDE"]).copy()
+
     filas = []
 
     for secuencia, grupo in df_in.groupby("SECUENCIA"):
+
         nivel_grupo = ""
+
         if "NIVEL" in grupo.columns:
             s = grupo["NIVEL"].dropna()
             if not s.empty:
@@ -470,91 +521,136 @@ def consolidar_periodos(df_in):
 
         inicio = None
         fin = None
-        escuelas = set()
-        cargos = set()
-        horas = 0.0
-        modulos = 0.0
+
+        escuelas = []
+        cargos = []
+
+        historial_horas = []
+        historial_modulos = []
+
+        horas_actual = 0
+        modulos_actual = 0
 
         for _, row in grupo.iterrows():
+
+            horas = float(row.get("HORAS_CATEDRA", 0) or 0)
+            modulos = float(row.get("MODULOS", 0) or 0)
+
             if inicio is None:
+
                 inicio = row["DESDE"]
                 fin = row["HASTA"]
 
-                if pd.notna(row.get("ESCUELA", None)):
-                    escuelas.add(str(row["ESCUELA"]))
+                if pd.notna(row.get("ESCUELA")):
+                    escuelas.append(str(row["ESCUELA"]))
 
-                if pd.notna(row.get("CARGO", None)):
-                    cargos.add(str(row["CARGO"]))
+                if pd.notna(row.get("CARGO")):
+                    cargos.append(str(row["CARGO"]))
 
-                horas += float(row.get("HORAS_CATEDRA", 0) or 0)
-                modulos += float(row.get("MODULOS", 0) or 0)
+                historial_horas.append(horas)
+                historial_modulos.append(modulos)
+
+                horas_actual = horas
+                modulos_actual = modulos
+
                 continue
 
-            # continuidad / solape
+            # -----------------------------
+            # CONTINUIDAD
+            # -----------------------------
             if row["DESDE"] <= fin + pd.Timedelta(days=1):
+
                 fin = max(fin, row["HASTA"])
 
-                if pd.notna(row.get("ESCUELA", None)):
-                    escuelas.add(str(row["ESCUELA"]))
+                if pd.notna(row.get("ESCUELA")):
+                    escuelas.append(str(row["ESCUELA"]))
 
-                if pd.notna(row.get("CARGO", None)):
-                    cargos.add(str(row["CARGO"]))
+                if pd.notna(row.get("CARGO")):
+                    cargos.append(str(row["CARGO"]))
 
-                horas += float(row.get("HORAS_CATEDRA", 0) or 0)
-                modulos += float(row.get("MODULOS", 0) or 0)
+                historial_horas.append(horas)
+                historial_modulos.append(modulos)
+
+                # conservar la última carga
+                horas_actual = horas
+                modulos_actual = modulos
 
             else:
+
                 dias = (fin - inicio).days + 1
                 meses = round(dias / 30.44, 1)
 
                 filas.append({
-                    "BAR_ID": f"{secuencia}|{inicio.strftime('%Y-%m-%d')}|{fin.strftime('%Y-%m-%d')}",
+                    "BAR_ID": f"{secuencia}|{inicio:%Y-%m-%d}|{fin:%Y-%m-%d}",
                     "SECUENCIA": str(secuencia),
                     "NIVEL": nivel_grupo,
                     "DESDE": inicio,
                     "HASTA": fin,
-                    "ESCUELA": " / ".join(sorted(escuelas)),
-                    "CARGO": " / ".join(sorted(cargos)),
-                    "HORAS_CATEDRA": round(horas, 2),
-                    "MODULOS": round(modulos, 2),
+                    "ESCUELA": " / ".join(dict.fromkeys(escuelas)),
+                    "CARGO": " / ".join(dict.fromkeys(cargos)),
+
+                    # última carga del tramo
+                    "HORAS_CATEDRA": horas_actual,
+                    "MODULOS": modulos_actual,
+
+                    # historial
+                    "HISTORIAL_HORAS": historial_horas.copy(),
+                    "HISTORIAL_MODULOS": historial_modulos.copy(),
+
                     "DIAS": dias,
                     "MESES_APROX": meses,
                     "CUMPLE_36M": meses >= 36
                 })
 
+                # reinicio
+
                 inicio = row["DESDE"]
                 fin = row["HASTA"]
-                escuelas = set()
-                cargos = set()
-                horas = float(row.get("HORAS_CATEDRA", 0) or 0)
-                modulos = float(row.get("MODULOS", 0) or 0)
 
-                if pd.notna(row.get("ESCUELA", None)):
-                    escuelas.add(str(row["ESCUELA"]))
+                escuelas = []
+                cargos = []
 
-                if pd.notna(row.get("CARGO", None)):
-                    cargos.add(str(row["CARGO"]))
+                historial_horas = [horas]
+                historial_modulos = [modulos]
+
+                horas_actual = horas
+                modulos_actual = modulos
+
+                if pd.notna(row.get("ESCUELA")):
+                    escuelas.append(str(row["ESCUELA"]))
+
+                if pd.notna(row.get("CARGO")):
+                    cargos.append(str(row["CARGO"]))
+
+        # última barra
 
         if inicio is not None:
+
             dias = (fin - inicio).days + 1
             meses = round(dias / 30.44, 1)
 
             filas.append({
-                "BAR_ID": f"{secuencia}|{inicio.strftime('%Y-%m-%d')}|{fin.strftime('%Y-%m-%d')}",
+                "BAR_ID": f"{secuencia}|{inicio:%Y-%m-%d}|{fin:%Y-%m-%d}",
                 "SECUENCIA": str(secuencia),
                 "NIVEL": nivel_grupo,
                 "DESDE": inicio,
                 "HASTA": fin,
-                "ESCUELA": " / ".join(sorted(escuelas)),
-                "CARGO": " / ".join(sorted(cargos)),
-                "HORAS_CATEDRA": round(horas, 2),
-                "MODULOS": round(modulos, 2),
+                "ESCUELA": " / ".join(dict.fromkeys(escuelas)),
+                "CARGO": " / ".join(dict.fromkeys(cargos)),
+
+                "HORAS_CATEDRA": horas_actual,
+                "MODULOS": modulos_actual,
+
+                "HISTORIAL_HORAS": historial_horas.copy(),
+                "HISTORIAL_MODULOS": historial_modulos.copy(),
+
                 "DIAS": dias,
                 "MESES_APROX": meses,
                 "CUMPLE_36M": meses >= 36
             })
 
     out = pd.DataFrame(filas)
+
     if out.empty:
         return out
 
