@@ -492,88 +492,124 @@ def consolidar_periodos(df_in):
     """
     Consolida períodos continuos por SECUENCIA.
 
-    Une únicamente los períodos para graficarlos, pero NO suma
-    horas ni módulos porque representan cargos distintos dentro
-    de una misma trayectoria.
+    Una barra continúa únicamente si:
 
-    Conserva:
-        - listado de cargos
-        - listado de escuelas
-        - historial de cargas
-        - última carga (la vigente al finalizar la barra)
+    - no hay corte de fechas
+    - la carga (HORAS_CATEDRA/MODULOS) es la misma
+
+    Si cambia la carga comienza una barra nueva.
     """
 
     if df_in.empty:
         return pd.DataFrame()
 
-    df_in = df_in.sort_values(["SECUENCIA", "DESDE"]).copy()
+    df = df_in.copy()
+
+    df["HORAS_CATEDRA"] = (
+        pd.to_numeric(df.get("HORAS_CATEDRA", 0), errors="coerce")
+        .fillna(0)
+    )
+
+    df["MODULOS"] = (
+        pd.to_numeric(df.get("MODULOS", 0), errors="coerce")
+        .fillna(0)
+    )
+
+    # Si la carga no vino informada intenta obtenerla desde el texto del cargo
+    if "CARGO" in df.columns:
+        for idx in df.index:
+
+            horas = float(df.at[idx, "HORAS_CATEDRA"])
+            modulos = float(df.at[idx, "MODULOS"])
+
+            if horas == 0 and modulos == 0:
+
+                hs, mods = extraer_horas_modulos_desde_cargo(
+                    df.at[idx, "CARGO"]
+                )
+
+                df.at[idx, "HORAS_CATEDRA"] = hs
+                df.at[idx, "MODULOS"] = mods
+
+    df = (
+        df.sort_values(["SECUENCIA", "DESDE"])
+        .reset_index(drop=True)
+    )
 
     filas = []
 
-    for secuencia, grupo in df_in.groupby("SECUENCIA"):
+    for secuencia, grupo in df.groupby("SECUENCIA"):
 
-        nivel_grupo = ""
-
-        if "NIVEL" in grupo.columns:
-            s = grupo["NIVEL"].dropna()
-            if not s.empty:
-                nivel_grupo = str(s.iloc[0])
+        grupo = grupo.sort_values("DESDE")
 
         inicio = None
         fin = None
 
-        escuelas = []
+        horas_actual = 0.0
+        modulos_actual = 0.0
+
+        nivel = ""
+
+        if "NIVEL" in grupo.columns:
+            s = grupo["NIVEL"].dropna()
+            if not s.empty:
+                nivel = str(s.iloc[0])
+
         cargos = []
+        escuelas = []
 
         historial_horas = []
         historial_modulos = []
 
-        horas_actual = 0
-        modulos_actual = 0
-
         for _, row in grupo.iterrows():
 
-            horas = float(row.get("HORAS_CATEDRA", 0) or 0)
-            modulos = float(row.get("MODULOS", 0) or 0)
+            desde = row["DESDE"]
+            hasta = row["HASTA"]
+
+            horas = float(row["HORAS_CATEDRA"])
+            modulos = float(row["MODULOS"])
+
+            cargo = str(row.get("CARGO", "")).strip()
+            escuela = str(row.get("ESCUELA", "")).strip()
 
             if inicio is None:
 
-                inicio = row["DESDE"]
-                fin = row["HASTA"]
-
-                if pd.notna(row.get("ESCUELA")):
-                    escuelas.append(str(row["ESCUELA"]))
-
-                if pd.notna(row.get("CARGO")):
-                    cargos.append(str(row["CARGO"]))
-
-                historial_horas.append(horas)
-                historial_modulos.append(modulos)
+                inicio = desde
+                fin = hasta
 
                 horas_actual = horas
                 modulos_actual = modulos
+
+                cargos = [cargo]
+                escuelas = [escuela]
+
+                historial_horas = [horas]
+                historial_modulos = [modulos]
 
                 continue
 
-            # -----------------------------
-            # CONTINUIDAD
-            # -----------------------------
-            if row["DESDE"] <= fin + pd.Timedelta(days=1):
+            continuidad = (
+                desde <= fin + pd.Timedelta(days=1)
+            )
 
-                fin = max(fin, row["HASTA"])
+            misma_carga = (
+                horas == horas_actual
+                and
+                modulos == modulos_actual
+            )
 
-                if pd.notna(row.get("ESCUELA")):
-                    escuelas.append(str(row["ESCUELA"]))
+            if continuidad and misma_carga:
 
-                if pd.notna(row.get("CARGO")):
-                    cargos.append(str(row["CARGO"]))
+                fin = max(fin, hasta)
+
+                if cargo not in cargos:
+                    cargos.append(cargo)
+
+                if escuela not in escuelas:
+                    escuelas.append(escuela)
 
                 historial_horas.append(horas)
                 historial_modulos.append(modulos)
-
-                # conservar la última carga
-                horas_actual = horas
-                modulos_actual = modulos
 
             else:
 
@@ -581,48 +617,60 @@ def consolidar_periodos(df_in):
                 meses = round(dias / 30.44, 1)
 
                 filas.append({
-                    "BAR_ID": f"{secuencia}|{inicio:%Y-%m-%d}|{fin:%Y-%m-%d}",
+
+                    "BAR_ID":
+                        f"{secuencia}|{inicio:%Y-%m-%d}|{fin:%Y-%m-%d}",
+
                     "SECUENCIA": str(secuencia),
-                    "NIVEL": nivel_grupo,
+
+                    "NIVEL": nivel,
+
                     "DESDE": inicio,
                     "HASTA": fin,
-                    "ESCUELA": " / ".join(dict.fromkeys(escuelas)),
-                    "CARGO": " / ".join(dict.fromkeys(cargos)),
 
-                    # última carga del tramo
-                    "HORAS_CATEDRA": horas_actual,
-                    "MODULOS": modulos_actual,
+                    "ESCUELA":
+                        " / ".join(escuelas),
 
-                    # historial
-                    "HISTORIAL_HORAS": historial_horas.copy(),
-                    "HISTORIAL_MODULOS": historial_modulos.copy(),
+                    "CARGO":
+                        " / ".join(cargos),
 
-                    "DIAS": dias,
-                    "MESES_APROX": meses,
-                    "CUMPLE_36M": meses >= 36
+                    "HORAS_CATEDRA":
+                        horas_actual,
+
+                    "MODULOS":
+                        modulos_actual,
+
+                    "HISTORIAL_HORAS":
+                        historial_horas.copy(),
+
+                    "HISTORIAL_MODULOS":
+                        historial_modulos.copy(),
+
+                    "DIAS":
+                        dias,
+
+                    "MESES_APROX":
+                        meses,
+
+                    "CUMPLE_36M":
+                        meses >= 36
                 })
 
-                # reinicio
+                # Nueva barra
 
-                inicio = row["DESDE"]
-                fin = row["HASTA"]
-
-                escuelas = []
-                cargos = []
-
-                historial_horas = [horas]
-                historial_modulos = [modulos]
+                inicio = desde
+                fin = hasta
 
                 horas_actual = horas
                 modulos_actual = modulos
 
-                if pd.notna(row.get("ESCUELA")):
-                    escuelas.append(str(row["ESCUELA"]))
+                cargos = [cargo]
+                escuelas = [escuela]
 
-                if pd.notna(row.get("CARGO")):
-                    cargos.append(str(row["CARGO"]))
+                historial_horas = [horas]
+                historial_modulos = [modulos]
 
-        # última barra
+        # Última barra
 
         if inicio is not None:
 
@@ -630,23 +678,43 @@ def consolidar_periodos(df_in):
             meses = round(dias / 30.44, 1)
 
             filas.append({
-                "BAR_ID": f"{secuencia}|{inicio:%Y-%m-%d}|{fin:%Y-%m-%d}",
+
+                "BAR_ID":
+                    f"{secuencia}|{inicio:%Y-%m-%d}|{fin:%Y-%m-%d}",
+
                 "SECUENCIA": str(secuencia),
-                "NIVEL": nivel_grupo,
+
+                "NIVEL": nivel,
+
                 "DESDE": inicio,
                 "HASTA": fin,
-                "ESCUELA": " / ".join(dict.fromkeys(escuelas)),
-                "CARGO": " / ".join(dict.fromkeys(cargos)),
 
-                "HORAS_CATEDRA": horas_actual,
-                "MODULOS": modulos_actual,
+                "ESCUELA":
+                    " / ".join(escuelas),
 
-                "HISTORIAL_HORAS": historial_horas.copy(),
-                "HISTORIAL_MODULOS": historial_modulos.copy(),
+                "CARGO":
+                    " / ".join(cargos),
 
-                "DIAS": dias,
-                "MESES_APROX": meses,
-                "CUMPLE_36M": meses >= 36
+                "HORAS_CATEDRA":
+                    horas_actual,
+
+                "MODULOS":
+                    modulos_actual,
+
+                "HISTORIAL_HORAS":
+                    historial_horas.copy(),
+
+                "HISTORIAL_MODULOS":
+                    historial_modulos.copy(),
+
+                "DIAS":
+                    dias,
+
+                "MESES_APROX":
+                    meses,
+
+                "CUMPLE_36M":
+                    meses >= 36
             })
 
     out = pd.DataFrame(filas)
@@ -654,7 +722,11 @@ def consolidar_periodos(df_in):
     if out.empty:
         return out
 
-    return out.sort_values(["SECUENCIA", "DESDE"]).reset_index(drop=True)
+    return (
+        out
+        .sort_values(["SECUENCIA", "DESDE"])
+        .reset_index(drop=True)
+    )
 
 # ---------------------------------
 # SELECTOR DE NIVEL (LIVIANO)
