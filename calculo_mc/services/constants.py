@@ -34,6 +34,8 @@ CODIGOS_VALIDOS = [
     "1252",
     "CAUSAS PARTICULARES",
     "114F1",
+    "115E1",
+    "115E3",
 ]
 niveles_dict = {
     "Inicial": [
