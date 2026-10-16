@@ -9,7 +9,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📋 Resumen de datos procesados")
+st.title("📋 Resumen de DATOS procesados")
 
 # ---------------------------------
 # VALIDACIÓN DE DATOS
