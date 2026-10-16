@@ -5,7 +5,7 @@ import pandas as pd
 # CONFIGURACIÓN DE LA PÁGINA
 # ---------------------------------
 st.set_page_config(
-    page_title="Ir Tabla de datos cargados",
+    page_title="Ir A Tabla de datos cargados",
     layout="wide"
 )
 
