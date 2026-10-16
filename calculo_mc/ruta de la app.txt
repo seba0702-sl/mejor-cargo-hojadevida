@@ -1,2 +1,2 @@
-cd C:\Users\Seba\Documents\GitHub\calculo_mejorCargo_mod\calculo_mc
+cd C:\Users\Seba\Documents\GitHub\mejor-cargo-hojadevida\calculo_mc
 streamlit run Inicio_CargaDeDatos.py

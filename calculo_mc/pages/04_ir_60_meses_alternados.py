@@ -114,67 +114,116 @@ df["HORAS_CATEDRA"] = df[columna_carga_numerica].where(
 # =====================================================
 
 
-def generar_grupos_interseccion(df_nivel):
-    df_nivel = df_nivel.sort_values(by=["SECUENCIA", "DESDE", "HASTA"]).reset_index(
-        drop=True
+def generar_grupos_interseccion(df_nivel, min_dias=1):
+    """
+    Genera combinaciones con como máximo una fila por SECUENCIA,
+    cuya intersección común dura al menos min_dias.
+
+    Cada combinación se devuelve una sola vez, aunque pueda
+    descubrirse desde distintas filas iniciales.
+    """
+    columnas_requeridas = {
+        "SECUENCIA", "DESDE", "HASTA", "MODULOS", "HORAS_CATEDRA"
+    }
+    faltantes = columnas_requeridas - set(df_nivel.columns)
+    if faltantes:
+        raise ValueError(f"Faltan columnas requeridas: {sorted(faltantes)}")
+
+    datos = df_nivel.copy()
+    datos["DESDE"] = pd.to_datetime(datos["DESDE"], errors="coerce")
+    datos["HASTA"] = pd.to_datetime(datos["HASTA"], errors="coerce")
+    datos = datos.dropna(subset=["SECUENCIA", "DESDE", "HASTA"])
+    datos = datos[datos["DESDE"] <= datos["HASTA"]].reset_index(drop=True)
+
+    if datos.empty:
+        return []
+
+    # Una secuencia puede tener varias filas: se conservan como
+    # alternativas en lugar de tomar solo la primera que aparezca.
+    por_secuencia = {}
+    for idx, fila in datos.iterrows():
+        por_secuencia.setdefault(fila["SECUENCIA"], []).append(idx)
+
+    # Orden determinista: probar primero las secuencias con menos
+    # alternativas reduce el trabajo de búsqueda.
+    secuencias = sorted(
+        por_secuencia,
+        key=lambda s: (len(por_secuencia[s]), str(s))
     )
 
-    grupos = []
-    grupos_unicos = set()
+    grupos = {}
+    seleccion = []
 
-    for i in range(len(df_nivel)):
-        base = df_nivel.iloc[i]
+    def guardar(desde, hasta):
+        dias = (hasta - desde).days + 1
+        if dias < min_dias:
+            return
 
-        secuencias_usadas = {base["SECUENCIA"]}
-        grupo = [base]
+        # La identidad incluye las filas elegidas, no solo sus fechas:
+        # filas distintas de una misma secuencia pueden tener cargas distintas.
+        indices = tuple(sorted(seleccion))
+        clave = indices
 
-        desde_max = base["DESDE"]
-        hasta_min = base["HASTA"]
+        if clave in grupos:
+            return
 
-        for j in range(len(df_nivel)):
-            if i == j:
-                continue
+        grupo_df = datos.loc[list(indices)].copy().reset_index(drop=True)
+        anios, meses, dias_resto = calcular_antiguedad_exacta(desde, hasta)
 
-            fila = df_nivel.iloc[j]
+        grupos[clave] = {
+            "grupo_df": grupo_df,
+            "fecha_desde": desde,
+            "fecha_hasta": hasta,
+            "anios": anios,
+            "meses": meses,
+            "dias": dias_resto,
+            "modulos": pd.to_numeric(
+                grupo_df["MODULOS"], errors="coerce"
+            ).fillna(0).sum(),
+            "horas": pd.to_numeric(
+                grupo_df["HORAS_CATEDRA"], errors="coerce"
+            ).fillna(0).sum(),
+        }
 
-            if fila["SECUENCIA"] in secuencias_usadas:
-                continue
+    def buscar(pos, desde, hasta):
+        if seleccion:
+            guardar(desde, hasta)
 
-            nuevo_desde = max(desde_max, fila["DESDE"])
-            nuevo_hasta = min(hasta_min, fila["HASTA"])
+        if pos == len(secuencias):
+            return
 
-            if nuevo_desde <= nuevo_hasta:
-                grupo.append(fila)
-                secuencias_usadas.add(fila["SECUENCIA"])
-                desde_max = nuevo_desde
-                hasta_min = nuevo_hasta
+        secuencia = secuencias[pos]
 
-        anios, meses, dias = calcular_antiguedad_exacta(desde_max, hasta_min)
+        # Opción válida: no incluir esta secuencia.
+        buscar(pos + 1, desde, hasta)
 
-        if anios > 0 or meses > 0 or dias > 0:
-            secuencias_ordenadas = tuple(sorted(map(str, secuencias_usadas)))
-            clave = (secuencias_ordenadas, desde_max, hasta_min)
-
-            if clave in grupos_unicos:
-                continue
-
-            grupos_unicos.add(clave)
-            df_grupo = pd.DataFrame(grupo)
-
-            grupos.append(
-                {
-                    "grupo_df": df_grupo,
-                    "fecha_desde": pd.to_datetime(desde_max),
-                    "fecha_hasta": pd.to_datetime(hasta_min),
-                    "anios": anios,
-                    "meses": meses,
-                    "dias": dias,
-                    "modulos": df_grupo["MODULOS"].sum(),
-                    "horas": df_grupo["HORAS_CATEDRA"].sum(),
-                }
+        # Probar cada fila candidata de esta secuencia.
+        for idx in por_secuencia[secuencia]:
+            fila = datos.iloc[idx]
+            nuevo_desde = (
+                fila["DESDE"] if desde is None
+                else max(desde, fila["DESDE"])
+            )
+            nuevo_hasta = (
+                fila["HASTA"] if hasta is None
+                else min(hasta, fila["HASTA"])
             )
 
-    return grupos
+            if nuevo_desde <= nuevo_hasta:
+                seleccion.append(idx)
+                buscar(pos + 1, nuevo_desde, nuevo_hasta)
+                seleccion.pop()
+
+    buscar(0, None, None)
+
+    return sorted(
+        grupos.values(),
+        key=lambda g: (
+            g["fecha_desde"],
+            g["fecha_hasta"],
+            tuple(sorted(g["grupo_df"]["SECUENCIA"].astype(str)))
+        )
+    )
 
 
 # =====================================================
