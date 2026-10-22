@@ -1,4 +1,3 @@
-60 aternadoss - mejor-cargo-hojadevida-16/10/2026
 import streamlit as st
 import pandas as pd
 import io
