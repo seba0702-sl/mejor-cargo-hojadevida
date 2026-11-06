@@ -265,21 +265,15 @@ def detectar_tipo_carga_desde_fila(escuela, cargo, nivel=""):
     return ""
 
 def detectar_nivel_desde_cargo_y_escuela(escuela, cargo):
-    """
-    Determina el nivel priorizando el ciclo indicado en CARGO.
-    Si no hay información de ciclo, utiliza ESCUELA como fallback.
-    """
 
     def normalizar(texto):
         texto = str(texto or "").upper()
 
-        reemplazos = {
+        for a, b in {
             "Á": "A", "É": "E", "Í": "I",
-            "Ó": "O", "Ú": "U",
-        }
-
-        for original, reemplazo in reemplazos.items():
-            texto = texto.replace(original, reemplazo)
+            "Ó": "O", "Ú": "U"
+        }.items():
+            texto = texto.replace(a, b)
 
         texto = re.sub(r"\s+", " ", texto).strip()
         return texto
@@ -288,28 +282,29 @@ def detectar_nivel_desde_cargo_y_escuela(escuela, cargo):
     escuela_norm = normalizar(escuela)
 
     # -----------------------------------------
-    # PRIORIDAD 1: CICLOS INDICADOS EN EL CARGO
+    # EGB 3ER CICLO = SECUNDARIA
+    # Contempla CIC, CIC. y CICLO
     # -----------------------------------------
-
-    # EGB 3er ciclo -> SECUNDARIA
     if re.search(
-        r"\b3(?:ER|RO|°|º)?\s*(?:\.?\s*)?CICLO\b",
+        r"\b3\s*(?:ER|RO)?\s*\.?\s*(?:CIC|CICLO)\b",
         cargo_norm
     ):
         return "Secundaria"
 
-    # 1er y 2do ciclo -> PRIMARIA
+    # -----------------------------------------
+    # EGB 1ER Y 2DO CICLO = PRIMARIA
+    # Contempla CIC, CIC. y CICLO
+    # -----------------------------------------
     if re.search(
-        r"\b(?:1(?:ER|RO|°|º)?\s*(?:Y|E)\s*)?"
-        r"2(?:DO|D0|°|º)?\s*(?:\.?\s*)?CICLO\b",
+        r"\b1\s*(?:ER|RO)?\s*\.?\s*"
+        r"Y\s*2\s*(?:DO|D0)?\s*\.?\s*(?:CIC|CICLO)\b",
         cargo_norm
     ):
         return "Primaria"
 
     # -----------------------------------------
-    # PRIORIDAD 2: NIVEL DESDE ESCUELA
+    # Si no hay ciclo explícito, usar escuela
     # -----------------------------------------
-
     return detectar_nivel_desde_escuela(escuela_norm)
 def completar_carga_y_nivel_hoja_vida(df):
     """
