@@ -275,152 +275,225 @@ def detectar_nivel_desde_cargo_y_escuela(escuela, cargo):
         }.items():
             texto = texto.replace(a, b)
 
-        texto = re.sub(r"\s+", " ", texto).strip()
-        return texto
+        return re.sub(r"\s+", " ", texto).strip()
 
     cargo_norm = normalizar(cargo)
     escuela_norm = normalizar(escuela)
 
-    # -----------------------------------------
-    # EGB 3ER CICLO = SECUNDARIA
-    # Contempla CIC, CIC. y CICLO
-    # -----------------------------------------
+    # 1ER Y 2DO CICLO -> PRIMARIA
+    if re.search(
+        r"\b1\s*(?:ER|RO)?\s*\.?\s*Y\s*"
+        r"2\s*(?:DO|D0)?\s*\.?\s*(?:CIC|CICLO)\b",
+        cargo_norm
+    ):
+        return "Primaria"
+
+    # 3ER CICLO -> SECUNDARIA
     if re.search(
         r"\b3\s*(?:ER|RO)?\s*\.?\s*(?:CIC|CICLO)\b",
         cargo_norm
     ):
         return "Secundaria"
 
-    # -----------------------------------------
-    # EGB 1ER Y 2DO CICLO = PRIMARIA
-    # Contempla CIC, CIC. y CICLO
-    # -----------------------------------------
-    if re.search(
-        r"\b1\s*(?:ER|RO)?\s*\.?\s*"
-        r"Y\s*2\s*(?:DO|D0)?\s*\.?\s*(?:CIC|CICLO)\b",
-        cargo_norm
-    ):
-        return "Primaria"
-
-    # -----------------------------------------
-    # Si no hay ciclo explícito, usar escuela
-    # -----------------------------------------
+    # Si el cargo no especifica ciclo, usar código/escuela
     return detectar_nivel_desde_escuela(escuela_norm)
 def completar_carga_y_nivel_hoja_vida(df):
-    """
-    Completa NIVEL, HORAS_CATEDRA y MODULOS para hoja de vida
-    venga de Excel, pegado o PDF.
-    """
+    import re
+    import pandas as pd
+
     if df is None or df.empty:
         return df
 
-    df = df.copy()
-    df.columns = df.columns.astype(str).str.upper().str.strip()
+    # -----------------------------------------
+    # NORMALIZAR NOMBRES DE COLUMNAS
+    # -----------------------------------------
+    df.columns = [str(c).strip().upper() for c in df.columns]
 
-    # asegurar columnas
-    # NIVEL (texto)
+    # Crear columnas necesarias si no existen
     if "NIVEL" not in df.columns:
         df["NIVEL"] = ""
 
-# HORAS_CATEDRA (numérico)
     if "HORAS_CATEDRA" not in df.columns:
-        df["HORAS_CATEDRA"] = pd.Series(
-        0,
-        index=df.index,
-        dtype="Int64"
-    )
-    else:
-        df["HORAS_CATEDRA"] = pd.to_numeric(
-        df["HORAS_CATEDRA"],
-        errors="coerce"
-    ).fillna(0).astype("Int64")
+        df["HORAS_CATEDRA"] = 0
 
-# MODULOS (numérico)
     if "MODULOS" not in df.columns:
-        df["MODULOS"] = pd.Series(
-        0,
-        index=df.index,
-        dtype="Int64"
-    )
-    else:
-        df["MODULOS"] = pd.to_numeric(
-        df["MODULOS"],
-        errors="coerce"
-    ).fillna(0).astype("Int64")
-    #st.write("TIPOS DENTRO DE completar_carga_y_nivel_hoja_vida")
-    #st.write(df[["NIVEL","HORAS_CATEDRA","MODULOS"]].dtypes)
-    col_escuela = next((c for c in df.columns if "ESCUELA" in c), None)
-    col_cargo = next((c for c in df.columns if "CARGO" in c), None)
-    col_carga = next((c for c in df.columns if "CARGA" in c), None)
+        df["MODULOS"] = 0
 
+    # -----------------------------------------
+    # DETECTAR COLUMNAS
+    # -----------------------------------------
+    col_escuela = next(
+        (c for c in df.columns if "ESCUELA" in c),
+        None
+    )
+
+    col_cargo = next(
+        (c for c in df.columns if "CARGO" in c),
+        None
+    )
+
+    col_carga = next(
+        (c for c in df.columns if "CARGA" in c),
+        None
+    )
+
+    # -----------------------------------------
+    # SI NO EXISTE ESCUELA, DEVOLVER DATAFRAME
+    # -----------------------------------------
     if col_escuela is None:
         return df
 
     # -----------------------------------------
-    # NIVEL
+    # NIVEL: PRIORIDAD AL CICLO DESCRIPTO EN CARGO
     # -----------------------------------------
-    # -----------------------------------------
-# NIVEL: PRIORIDAD AL CICLO DESCRIPTO EN CARGO
-# -----------------------------------------
     for i in df.index:
 
-        escuela = df.at[i, col_escuela] if col_escuela else ""
+        escuela = df.at[i, col_escuela]
         cargo = df.at[i, col_cargo] if col_cargo else ""
 
-    nivel_actual = str(df.at[i, "NIVEL"]).strip()
+        # Normalizar cargo
+        cargo_norm = str(cargo or "").upper()
 
-    cargo_norm = str(cargo or "").upper()
-
-    # Detectar si el cargo menciona explícitamente un ciclo
-    menciona_tercer_ciclo = bool(
-        re.search(
-            r"\b3(?:ER|RO|°|º)?\s*\.?\s*CICLO\b",
+        cargo_norm = (
             cargo_norm
+            .replace("Á", "A")
+            .replace("É", "E")
+            .replace("Í", "I")
+            .replace("Ó", "O")
+            .replace("Ú", "U")
+            .replace("°", " ")
+            .replace("º", " ")
         )
-    )
 
-    menciona_primer_segundo_ciclo = bool(
-        re.search(
-            r"\b(?:1(?:ER|RO|°|º)?\s*(?:Y|E)\s*)?"
-            r"2(?:DO|D0|°|º)?\s*\.?\s*CICLO\b",
-            cargo_norm
+        cargo_norm = re.sub(r"\s+", " ", cargo_norm).strip()
+
+        # -----------------------------------------
+        # 1ER Y 2DO CICLO -> PRIMARIA
+        # Ejemplos:
+        # EGB 1ER. Y 2DO. CIC
+        # EGB 1ER Y 2DO CICLO
+        # -----------------------------------------
+        menciona_primer_segundo_ciclo = bool(
+            re.search(
+                r"\b1\s*(?:ER|RO)?\s*\.?\s*Y\s*"
+                r"2\s*(?:DO|D0|RO)?\s*\.?\s*(?:CIC|CICLO)\b",
+                cargo_norm
+            )
         )
-    )
 
-    # Si el cargo dice 3er ciclo, prevalece Secundaria
-    if menciona_tercer_ciclo:
-        df.at[i, "NIVEL"] = "Secundaria"
+        # -----------------------------------------
+        # 3ER CICLO -> SECUNDARIA
+        # Ejemplos:
+        # EGB 3ER. CICLO
+        # EGB 3ER CIC
+        # EGB 3ER.
+        # -----------------------------------------
+        menciona_tercer_ciclo = bool(
+            re.search(
+                r"\b3\s*(?:ER|RO)\s*\.?(?:\s*(?:CIC|CICLO))?\b",
+                cargo_norm
+            )
+        )
 
-    # Si dice 1er y 2do ciclo, prevalece Primaria
-    elif menciona_primer_segundo_ciclo:
-        df.at[i, "NIVEL"] = "Primaria"
+        # -----------------------------------------
+        # PRIORIDAD: CICLO DEL CARGO
+        # -----------------------------------------
+        if menciona_primer_segundo_ciclo:
+            df.at[i, "NIVEL"] = "Primaria"
 
-    # Si no hay NIVEL y no se detectó ciclo, usar ESCUELA
-    elif not nivel_actual:
-        df.at[i, "NIVEL"] = detectar_nivel_desde_escuela(escuela)
+        elif menciona_tercer_ciclo:
+            df.at[i, "NIVEL"] = "Secundaria"
+
+        else:
+            # Si no se identifica ciclo, usar código de escuela
+            df.at[i, "NIVEL"] = detectar_nivel_desde_escuela(escuela)
 
     # -----------------------------------------
-    # HORAS_CATEDRA / MODULOS
+    # HORAS CATEDRA Y MODULOS
     # -----------------------------------------
-    if col_carga is not None:
-        for i in df.index:
-            carga = pd.to_numeric(df.at[i, col_carga], errors="coerce")
-            if pd.isna(carga):
-                continue
+    for i in df.index:
 
-            carga = int(carga)
+        cargo = str(df.at[i, col_cargo] if col_cargo else "").upper()
 
-            escuela = df.at[i, col_escuela] if col_escuela in df.columns else ""
-            cargo = df.at[i, col_cargo] if col_cargo in df.columns else ""
-            nivel = df.at[i, "NIVEL"] if "NIVEL" in df.columns else ""
+        # Normalizar texto
+        cargo = (
+            cargo
+            .replace(",", ".")
+            .replace("Á", "A")
+            .replace("É", "E")
+            .replace("Í", "I")
+            .replace("Ó", "O")
+            .replace("Ú", "U")
+        )
 
-            tipo = detectar_tipo_carga_desde_fila(escuela, cargo, nivel)
+        # Buscar horas cátedra
+        horas = re.search(
+            r"(\d+(?:\.\d+)?)\s*(?:HORAS?\s*CATEDRA|HS?\s*CATEDRA|H\.?C\.?)",
+            cargo
+        )
 
-            if tipo == "MODULOS":
-                df.at[i, "MODULOS"] = int(carga)
+        # Buscar módulos
+        modulos = re.search(
+            r"(\d+(?:\.\d+)?)\s*(?:MODULOS?|MOD\.?)",
+            cargo
+        )
 
-            elif tipo == "HORAS_CATEDRA":
-                df.at[i, "HORAS_CATEDRA"] = int(carga)
+        df.at[i, "HORAS_CATEDRA"] = (
+            float(horas.group(1)) if horas else 0
+        )
+
+        df.at[i, "MODULOS"] = (
+            float(modulos.group(1)) if modulos else 0
+        )
+
+        # Si existe carga horaria, intentar extraer datos de allí
+        if col_carga:
+
+            carga = str(df.at[i, col_carga] or "").upper()
+
+            carga = (
+                carga
+                .replace(",", ".")
+                .replace("Á", "A")
+                .replace("É", "E")
+                .replace("Í", "I")
+                .replace("Ó", "O")
+                .replace("Ú", "U")
+            )
+
+            if df.at[i, "HORAS_CATEDRA"] == 0:
+                horas_carga = re.search(
+                    r"(\d+(?:\.\d+)?)\s*(?:HORAS?\s*CATEDRA|HS?\s*CATEDRA|H\.?C\.?)",
+                    carga
+                )
+
+                if horas_carga:
+                    df.at[i, "HORAS_CATEDRA"] = float(
+                        horas_carga.group(1)
+                    )
+
+            if df.at[i, "MODULOS"] == 0:
+                modulos_carga = re.search(
+                    r"(\d+(?:\.\d+)?)\s*(?:MODULOS?|MOD\.?)",
+                    carga
+                )
+
+                if modulos_carga:
+                    df.at[i, "MODULOS"] = float(
+                        modulos_carga.group(1)
+                    )
+
+    # -----------------------------------------
+    # LIMPIAR VALORES NULOS
+    # -----------------------------------------
+    df["NIVEL"] = df["NIVEL"].fillna("")
+    df["HORAS_CATEDRA"] = pd.to_numeric(
+        df["HORAS_CATEDRA"], errors="coerce"
+    ).fillna(0)
+
+    df["MODULOS"] = pd.to_numeric(
+        df["MODULOS"], errors="coerce"
+    ).fillna(0)
 
     return df
 
