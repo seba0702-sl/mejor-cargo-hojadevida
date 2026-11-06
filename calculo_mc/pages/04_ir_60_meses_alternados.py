@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="60 Meses Alternados por Nivel", layout="wide")
+st.set_page_config(page_title="60 Meses Alternados por NIVEL", layout="wide")
 
 st.title("Calculo de 60 Meses Alternados por Nivel")
 
