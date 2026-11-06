@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import re
 
 st.set_page_config(page_title="60 Meses Alternados por Nivel", layout="wide")
 
@@ -68,7 +69,7 @@ df.sort_values("DESDE", inplace=True)
 df.reset_index(drop=True, inplace=True)
 
 # =====================================================
-# NIVEL
+# NIVEL: PRIORIDAD AL CICLO DEL CARGO
 # =====================================================
 
 niveles_dict = {
@@ -84,14 +85,63 @@ niveles_dict = {
 def detectar_nivel(escuela):
     if pd.isna(escuela):
         return None
+
     escuela = str(escuela).upper()
+
     for nivel, codigos in niveles_dict.items():
         if any(cod in escuela for cod in codigos):
             return nivel
+
     return None
 
 
-df["NIVEL"] = df["ESCUELA"].apply(detectar_nivel)
+def detectar_nivel_por_cargo(cargo):
+    if pd.isna(cargo):
+        return None
+
+    cargo = str(cargo).upper()
+
+    cargo = (
+        cargo
+        .replace("Á", "A")
+        .replace("É", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
+        .replace("°", " ")
+        .replace("º", " ")
+    )
+
+    cargo = " ".join(cargo.split())
+
+    # 1ER Y 2DO CICLO -> PRIMARIA
+    patron_primaria = (
+        r"\b1\s*(?:ER|RO)?\s*\.?\s*Y\s*"
+        r"2\s*(?:DO|D0|RO)?\s*\.?\s*(?:CIC|CICLO)\b"
+    )
+
+    if re.search(patron_primaria, cargo):
+        return "Primaria"
+
+    # 3ER CICLO / 3ER. -> SECUNDARIA
+    patron_secundaria = r"\b3\s*(?:ER|RO)\s*\.?(?:\s*(?:CIC|CICLO))?\b"
+
+    if re.search(patron_secundaria, cargo):
+        return "Secundaria"
+
+    return None
+
+
+# Primero se determina el nivel por el cargo.
+# Si no se reconoce el ciclo, se utiliza el código de escuela.
+
+df["NIVEL_CARGO"] = df["CARGO"].apply(detectar_nivel_por_cargo)
+
+df["NIVEL"] = df["NIVEL_CARGO"].fillna(
+    df["ESCUELA"].apply(detectar_nivel)
+)
+
+df.drop(columns=["NIVEL_CARGO"], inplace=True)
 
 # =====================================================
 # CARGA HORARIA
