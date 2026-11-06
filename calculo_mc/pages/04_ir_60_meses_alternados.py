@@ -73,11 +73,11 @@ df.reset_index(drop=True, inplace=True)
 
 niveles_dict = {
     "Inicial": ["JI", "JS", "JU", "JM", "JV"],
-    "Primaria": ["PP", "EP", "PA", "DA", "DC", "DE","ESCUELA PRIMARIA BASICA"],
+    "Primaria": ["PP", "EP", "PA", "DA", "DC", "DE"],
     "Especial": ["EE", "EL", "CFI", "ET", "ESPECIAL"],
-    "Secundaria": ["MM", "MS", "ES", "ESB", "MT", "BS", "MA", "MC", "AS","ESC. DE ENS. MEDIA","ESC. SECUND. TECNICA","ESC. SECUNDARIA BASICA"],
+    "Secundaria": ["MM", "MS", "ES", "ESB", "MT", "BS", "MA", "MC", "AS"],
     "Adulto": ["DM", "CENS", "DF", "DS", "MF", "ADULTOS", "ADULTO", "CFP", "CFL"],
-    "Superior": ["IS", "AA", "AT", "AF", "AV", "AC", "AD", "AM", "AP", "FC","CENTRO DE EDUC. FISICA","CEF"],
+    "Superior": ["IS", "AA", "AT", "AF", "AV", "AC", "AD", "AM", "AP", "FC"],
 }
 
 

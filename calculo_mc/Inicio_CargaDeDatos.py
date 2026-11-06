@@ -264,7 +264,53 @@ def detectar_tipo_carga_desde_fila(escuela, cargo, nivel=""):
 
     return ""
 
+def detectar_nivel_desde_cargo_y_escuela(escuela, cargo):
+    """
+    Determina el nivel priorizando el ciclo indicado en CARGO.
+    Si no hay información de ciclo, utiliza ESCUELA como fallback.
+    """
 
+    def normalizar(texto):
+        texto = str(texto or "").upper()
+
+        reemplazos = {
+            "Á": "A", "É": "E", "Í": "I",
+            "Ó": "O", "Ú": "U",
+        }
+
+        for original, reemplazo in reemplazos.items():
+            texto = texto.replace(original, reemplazo)
+
+        texto = re.sub(r"\s+", " ", texto).strip()
+        return texto
+
+    cargo_norm = normalizar(cargo)
+    escuela_norm = normalizar(escuela)
+
+    # -----------------------------------------
+    # PRIORIDAD 1: CICLOS INDICADOS EN EL CARGO
+    # -----------------------------------------
+
+    # EGB 3er ciclo -> SECUNDARIA
+    if re.search(
+        r"\b3(?:ER|RO|°|º)?\s*(?:\.?\s*)?CICLO\b",
+        cargo_norm
+    ):
+        return "Secundaria"
+
+    # 1er y 2do ciclo -> PRIMARIA
+    if re.search(
+        r"\b(?:1(?:ER|RO|°|º)?\s*(?:Y|E)\s*)?"
+        r"2(?:DO|D0|°|º)?\s*(?:\.?\s*)?CICLO\b",
+        cargo_norm
+    ):
+        return "Primaria"
+
+    # -----------------------------------------
+    # PRIORIDAD 2: NIVEL DESDE ESCUELA
+    # -----------------------------------------
+
+    return detectar_nivel_desde_escuela(escuela_norm)
 def completar_carga_y_nivel_hoja_vida(df):
     """
     Completa NIVEL, HORAS_CATEDRA y MODULOS para hoja de vida
@@ -318,14 +364,45 @@ def completar_carga_y_nivel_hoja_vida(df):
     # -----------------------------------------
     # NIVEL
     # -----------------------------------------
+    # -----------------------------------------
+# NIVEL: PRIORIDAD AL CICLO DESCRIPTO EN CARGO
+# -----------------------------------------
     for i in df.index:
-        escuela = df.at[i, col_escuela] if col_escuela in df.columns else ""
-        cargo = df.at[i, col_cargo] if col_cargo in df.columns else ""
 
-        nivel_actual = str(df.at[i, "NIVEL"]).strip() if "NIVEL" in df.columns else ""
+        escuela = df.at[i, col_escuela] if col_escuela else ""
+        cargo = df.at[i, col_cargo] if col_cargo else ""
 
-        if not nivel_actual:
-            df.at[i, "NIVEL"] = detectar_nivel_desde_escuela(escuela)
+    nivel_actual = str(df.at[i, "NIVEL"]).strip()
+
+    cargo_norm = str(cargo or "").upper()
+
+    # Detectar si el cargo menciona explícitamente un ciclo
+    menciona_tercer_ciclo = bool(
+        re.search(
+            r"\b3(?:ER|RO|°|º)?\s*\.?\s*CICLO\b",
+            cargo_norm
+        )
+    )
+
+    menciona_primer_segundo_ciclo = bool(
+        re.search(
+            r"\b(?:1(?:ER|RO|°|º)?\s*(?:Y|E)\s*)?"
+            r"2(?:DO|D0|°|º)?\s*\.?\s*CICLO\b",
+            cargo_norm
+        )
+    )
+
+    # Si el cargo dice 3er ciclo, prevalece Secundaria
+    if menciona_tercer_ciclo:
+        df.at[i, "NIVEL"] = "Secundaria"
+
+    # Si dice 1er y 2do ciclo, prevalece Primaria
+    elif menciona_primer_segundo_ciclo:
+        df.at[i, "NIVEL"] = "Primaria"
+
+    # Si no hay NIVEL y no se detectó ciclo, usar ESCUELA
+    elif not nivel_actual:
+        df.at[i, "NIVEL"] = detectar_nivel_desde_escuela(escuela)
 
     # -----------------------------------------
     # HORAS_CATEDRA / MODULOS
