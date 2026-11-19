@@ -297,6 +297,7 @@ def detectar_nivel_desde_cargo_y_escuela(escuela, cargo):
 
     # Si el cargo no especifica ciclo, usar código/escuela
     return detectar_nivel_desde_escuela(escuela_norm)
+
 def completar_carga_y_nivel_hoja_vida(df):
     import re
     import pandas as pd
@@ -309,15 +310,29 @@ def completar_carga_y_nivel_hoja_vida(df):
     # -----------------------------------------
     df.columns = [str(c).strip().upper() for c in df.columns]
 
-    # Crear columnas necesarias si no existen
+    # -----------------------------------------
+    # ASEGURAR TIPOS DE DATOS
+    # Evitar conflictos con pandas Arrow
+    # -----------------------------------------
+    for col in ["HORAS_CATEDRA", "MODULOS"]:
+        if col not in df.columns:
+            df[col] = pd.Series(0.0, index=df.index, dtype="float64")
+        else:
+            valores = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            ).fillna(0)
+
+            df[col] = pd.Series(
+                valores.to_numpy(dtype="float64"),
+                index=df.index,
+                dtype="float64"
+            )
+
     if "NIVEL" not in df.columns:
         df["NIVEL"] = ""
 
-    if "HORAS_CATEDRA" not in df.columns:
-        df["HORAS_CATEDRA"] = 0
-
-    if "MODULOS" not in df.columns:
-        df["MODULOS"] = 0
+    df["NIVEL"] = df["NIVEL"].astype("object")
 
     # -----------------------------------------
     # DETECTAR COLUMNAS
@@ -337,165 +352,160 @@ def completar_carga_y_nivel_hoja_vida(df):
         None
     )
 
-    # -----------------------------------------
-    # SI NO EXISTE ESCUELA, DEVOLVER DATAFRAME
-    # -----------------------------------------
     if col_escuela is None:
         return df
 
     # -----------------------------------------
-    # NIVEL: PRIORIDAD AL CICLO DESCRIPTO EN CARGO
+    # FUNCION PARA NORMALIZAR TEXTOS
     # -----------------------------------------
+    def normalizar_texto(valor):
+        if pd.isna(valor):
+            return ""
+
+        texto = str(valor).upper()
+
+        reemplazos = {
+            "Á": "A",
+            "É": "E",
+            "Í": "I",
+            "Ó": "O",
+            "Ú": "U",
+            "°": " ",
+            "º": " ",
+        }
+
+        for original, nuevo in reemplazos.items():
+            texto = texto.replace(original, nuevo)
+
+        texto = re.sub(r"\s+", " ", texto).strip()
+
+        return texto
+
+    # -----------------------------------------
+    # NIVEL EDUCATIVO
+    # PRIORIDAD AL CICLO DESCRIPTO EN CARGO
+    # -----------------------------------------
+    patron_primer_segundo = re.compile(
+        r"\b1(?:ER|RO)?\.?\s*Y\s*"
+        r"2(?:DO|D0|RO)?\.?\s*"
+        r"(?:CIC(?:LO)?)?\b"
+    )
+
+    patron_tercer = re.compile(
+        r"\b3(?:ER|RO)\.?\s*"
+        r"(?:CIC(?:LO)?)?\b"
+    )
+
     for i in df.index:
 
         escuela = df.at[i, col_escuela]
-        cargo = df.at[i, col_cargo] if col_cargo else ""
 
-        # Normalizar cargo
-        cargo_norm = str(cargo or "").upper()
-
-        cargo_norm = (
-            cargo_norm
-            .replace("Á", "A")
-            .replace("É", "E")
-            .replace("Í", "I")
-            .replace("Ó", "O")
-            .replace("Ú", "U")
-            .replace("°", " ")
-            .replace("º", " ")
+        cargo = (
+            normalizar_texto(df.at[i, col_cargo])
+            if col_cargo else ""
         )
 
-        cargo_norm = re.sub(r"\s+", " ", cargo_norm).strip()
-
-        # -----------------------------------------
-        # 1ER Y 2DO CICLO -> PRIMARIA
-        # Ejemplos:
-        # EGB 1ER. Y 2DO. CIC
-        # EGB 1ER Y 2DO CICLO
-        # -----------------------------------------
-        menciona_primer_segundo_ciclo = bool(
-            re.search(
-                r"\b1\s*(?:ER|RO)?\s*\.?\s*Y\s*"
-                r"2\s*(?:DO|D0|RO)?\s*\.?\s*(?:CIC|CICLO)\b",
-                cargo_norm
-            )
+        menciona_primer_segundo = bool(
+            patron_primer_segundo.search(cargo)
         )
 
-        # -----------------------------------------
-        # 3ER CICLO -> SECUNDARIA
-        # Ejemplos:
-        # EGB 3ER. CICLO
-        # EGB 3ER CIC
-        # EGB 3ER.
-        # -----------------------------------------
-        menciona_tercer_ciclo = bool(
-            re.search(
-                r"\b3\s*(?:ER|RO)\s*\.?(?:\s*(?:CIC|CICLO))?\b",
-                cargo_norm
-            )
+        menciona_tercer = bool(
+            patron_tercer.search(cargo)
         )
 
-        # -----------------------------------------
-        # PRIORIDAD: CICLO DEL CARGO
-        # -----------------------------------------
-        if menciona_primer_segundo_ciclo:
+        if menciona_primer_segundo:
             df.at[i, "NIVEL"] = "Primaria"
 
-        elif menciona_tercer_ciclo:
+        elif menciona_tercer:
             df.at[i, "NIVEL"] = "Secundaria"
 
         else:
-            # Si no se identifica ciclo, usar código de escuela
-            df.at[i, "NIVEL"] = detectar_nivel_desde_escuela(escuela)
+            df.at[i, "NIVEL"] = detectar_nivel_desde_escuela(
+                escuela
+            )
 
     # -----------------------------------------
-    # HORAS CATEDRA Y MODULOS
+    # PATRONES DE HORAS CATEDRA Y MODULOS
+    # -----------------------------------------
+    patron_horas = re.compile(
+        r"(\d+(?:\.\d+)?)\s*"
+        r"(?:HORAS?\s*CATEDRA|HS?\.?\s*CATEDRA|H\.?\s*C\.?)"
+    )
+
+    patron_modulos = re.compile(
+        r"(\d+(?:\.\d+)?)\s*"
+        r"(?:MODULOS?|MOD\.?)"
+    )
+
+    # -----------------------------------------
+    # CALCULAR HORAS CATEDRA Y MODULOS
     # -----------------------------------------
     for i in df.index:
 
-        cargo = str(df.at[i, col_cargo] if col_cargo else "").upper()
-
-        # Normalizar texto
         cargo = (
-            cargo
-            .replace(",", ".")
-            .replace("Á", "A")
-            .replace("É", "E")
-            .replace("Í", "I")
-            .replace("Ó", "O")
-            .replace("Ú", "U")
+            normalizar_texto(df.at[i, col_cargo])
+            if col_cargo else ""
         )
 
-        # Buscar horas cátedra
-        horas = re.search(
-            r"(\d+(?:\.\d+)?)\s*(?:HORAS?\s*CATEDRA|HS?\s*CATEDRA|H\.?C\.?)",
-            cargo
+        # Buscar en CARGO
+        horas = patron_horas.search(cargo)
+        modulos = patron_modulos.search(cargo)
+
+        horas_valor = (
+            float(horas.group(1)) if horas else 0.0
         )
 
-        # Buscar módulos
-        modulos = re.search(
-            r"(\d+(?:\.\d+)?)\s*(?:MODULOS?|MOD\.?)",
-            cargo
+        modulos_valor = (
+            float(modulos.group(1)) if modulos else 0.0
         )
 
-        df.at[i, "HORAS_CATEDRA"] = (
-            float(horas.group(1)) if horas else 0
-        )
-
-        df.at[i, "MODULOS"] = (
-            float(modulos.group(1)) if modulos else 0
-        )
-
-        # Si existe carga horaria, intentar extraer datos de allí
+        # -------------------------------------
+        # SI NO ENCUENTRA, BUSCAR EN CARGA HORARIA
+        # -------------------------------------
         if col_carga:
 
-            carga = str(df.at[i, col_carga] or "").upper()
-
-            carga = (
-                carga
-                .replace(",", ".")
-                .replace("Á", "A")
-                .replace("É", "E")
-                .replace("Í", "I")
-                .replace("Ó", "O")
-                .replace("Ú", "U")
+            carga = normalizar_texto(
+                df.at[i, col_carga]
             )
 
-            if df.at[i, "HORAS_CATEDRA"] == 0:
-                horas_carga = re.search(
-                    r"(\d+(?:\.\d+)?)\s*(?:HORAS?\s*CATEDRA|HS?\s*CATEDRA|H\.?C\.?)",
-                    carga
-                )
+            if horas_valor == 0:
+                horas_carga = patron_horas.search(carga)
 
                 if horas_carga:
-                    df.at[i, "HORAS_CATEDRA"] = float(
+                    horas_valor = float(
                         horas_carga.group(1)
                     )
 
-            if df.at[i, "MODULOS"] == 0:
-                modulos_carga = re.search(
-                    r"(\d+(?:\.\d+)?)\s*(?:MODULOS?|MOD\.?)",
-                    carga
-                )
+            if modulos_valor == 0:
+                modulos_carga = patron_modulos.search(carga)
 
                 if modulos_carga:
-                    df.at[i, "MODULOS"] = float(
+                    modulos_valor = float(
                         modulos_carga.group(1)
                     )
 
+        # -------------------------------------
+        # ASIGNAR VALORES NUMERICOS
+        # -------------------------------------
+        df.at[i, "HORAS_CATEDRA"] = horas_valor
+        df.at[i, "MODULOS"] = modulos_valor
+
     # -----------------------------------------
-    # LIMPIAR VALORES NULOS
+    # LIMPIEZA FINAL
     # -----------------------------------------
     df["NIVEL"] = df["NIVEL"].fillna("")
-    df["HORAS_CATEDRA"] = pd.to_numeric(
-        df["HORAS_CATEDRA"], errors="coerce"
-    ).fillna(0)
 
-    df["MODULOS"] = pd.to_numeric(
-        df["MODULOS"], errors="coerce"
-    ).fillna(0)
+    for col in ["HORAS_CATEDRA", "MODULOS"]:
+        df[col] = pd.Series(
+            pd.to_numeric(df[col], errors="coerce")
+            .fillna(0)
+            .to_numpy(dtype="float64"),
+            index=df.index,
+            dtype="float64"
+        )
 
     return df
+
 
 def extraer_datos_diegep(pdf_file):
     data_vida, data_licencias = [], []
